@@ -47,9 +47,9 @@
           </div>
         </div>
         <div class="right-nav">
-          <button class="nav-button">下载所有</button>
-          <button class="nav-button">添加文件</button>
-          <button class="nav-button nav-button-clear">清空</button>
+          <el-button type="primary" class="nav-button">下载所有</el-button>
+          <el-button type="success" class="nav-button">添加文件</el-button>
+          <el-button type="danger" class="nav-button nav-button-clear">清空</el-button>
         </div>
       </div>
       <div class="transfer-file">
@@ -131,7 +131,7 @@ const configuration = ref({
 
 const switchFunction = (tab) => {
   activeTab.value = tab;
-}
+};
 
 // 选择并发送文件
 const selectFile = () => {
@@ -493,10 +493,7 @@ onMounted(() => {
         flex: 1;
         display: flex;
         justify-content: flex-end;
-        .nav-button {
-          padding: 5px;
-          margin-right: 5px;
-        }
+        align-items: center;
       }
     }
 
@@ -524,6 +521,10 @@ onMounted(() => {
       .drop-area.drop-hover {
         border-color: #2196f3;
         background-color: rgba(33, 150, 243, 0.05);
+      }
+
+      .drop-content {
+        color: #b0b0b0;
       }
 
       .file-container {
