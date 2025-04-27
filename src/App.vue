@@ -49,7 +49,9 @@
         <div class="right-nav">
           <el-button type="primary" class="nav-button">下载所有</el-button>
           <el-button type="success" class="nav-button">添加文件</el-button>
-          <el-button type="danger" class="nav-button nav-button-clear">清空</el-button>
+          <el-button type="danger" class="nav-button nav-button-clear"
+            >清空</el-button
+          >
         </div>
       </div>
       <div class="transfer-file">
@@ -70,13 +72,16 @@
               <div class="file-name">{{ file.name }}</div>
               <div class="file-details">
                 <div class="size">{{ (file.size / 1024).toFixed(2) }} KB</div>
-                <div>· {{ file.date }}</div>
-                <div>pic</div>
+                <div class="delete_btn" @click="handleDeleteFile(index)">
+                  <el-tooltip content="sure delete???" placement="top"
+                    ><close-one class="close" theme="outline" size="16"
+                  /></el-tooltip>
+                </div>
               </div>
             </div>
           </div>
           <div class="file-list" v-if="receivedFileList.length">
-            <div>已收到文件</div>
+            <div class="has-receive">已收到文件</div>
             <div
               v-for="(file, index) in receivedFileList"
               :key="index"
@@ -85,8 +90,6 @@
               <div class="file-name">{{ file.name }}</div>
               <div class="file-details">
                 <div class="size">{{ (file.size / 1024).toFixed(2) }} KB</div>
-                <div>· {{ file.date }}</div>
-                <div>pic</div>
               </div>
             </div>
           </div>
@@ -108,6 +111,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
+import { DeleteTwo, CloseOne } from '@icon-park/vue-next';
 
 const localFilesList = ref([]);
 const receivedFileList = ref([]);
@@ -131,6 +135,10 @@ const configuration = ref({
 
 const switchFunction = (tab) => {
   activeTab.value = tab;
+};
+
+const handleDeleteFile = (index) => {
+  localFilesList.value.splice(index, 1);
 };
 
 // 选择并发送文件
@@ -528,25 +536,32 @@ onMounted(() => {
       }
 
       .file-container {
-        .has-send {
-          margin: 0 0 10px 0;
-        }
-
         .file-list {
           width: 100%;
           margin: 0 20px;
+
+          .has-receive {
+            margin-bottom: 20px;
+          }
+
+          .has-send {
+            margin: 0 0 10px 0;
+          }
 
           .file-item {
             display: flex;
             align-items: center;
             padding: 5px 8px;
             border: 1px solid #eee;
+            border-radius: 8px;
             width: fit-content;
+            margin-bottom: 10px;
 
             .file-name {
               width: fit-content;
               color: #4a4a4a;
               font-size: 14px;
+              padding: 5px 8px;
             }
 
             .file-details {
@@ -554,6 +569,31 @@ onMounted(() => {
               font-size: 12px;
 
               display: flex;
+
+              .size {
+                background-color: #fafafa;
+                border: 1px solid #d9d9d9;
+                padding: 0 7px;
+                line-height: 20px;
+                border-radius: 4px;
+              }
+
+              .delete_btn {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                padding: 5px 8px;
+                .close {
+                  display: flex;
+                  justify-content: center;
+                  align-items: center;
+                  color: #696969;
+                  &:hover {
+                    color: red;
+                    cursor: pointer;
+                  }
+                }
+              }
             }
           }
         }
@@ -561,6 +601,7 @@ onMounted(() => {
 
       .bottom {
         height: 70px;
+        margin-top: 10px;
 
         .btn {
           margin-left: 20px;
