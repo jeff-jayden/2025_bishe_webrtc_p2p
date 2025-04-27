@@ -48,13 +48,23 @@
         </div>
         <div class="right-nav">
           <el-button type="primary" class="nav-button">下载所有</el-button>
-          <el-button type="success" class="nav-button">添加文件</el-button>
-          <el-button type="danger" class="nav-button nav-button-clear"
+          <el-button type="success" class="nav-button" @click="selectFile"
+            >添加文件</el-button
+          >
+          <el-button
+            type="danger"
+            class="nav-button nav-button-clear"
+            @click="clearFiles"
             >清空</el-button
           >
         </div>
       </div>
-      <div class="transfer-file">
+      <div
+        class="transfer-file"
+        @drop.prevent="handleDrop"
+        @dragenter.prevent
+        @dragover.prevent
+      >
         <!-- 拖放区域 -->
         <div class="drop-area" @click="selectFile">
           <div class="drop-content">
@@ -87,7 +97,11 @@
               :key="index"
               class="file-item"
             >
-              <div class="file-name">{{ file.name }}</div>
+              <div class="file-name">
+                <a href="{{URL.createObjectURL(file)}}" :download="file.name">{{
+                  file.name
+                }}</a>
+              </div>
               <div class="file-details">
                 <div class="size">{{ (file.size / 1024).toFixed(2) }} KB</div>
               </div>
@@ -111,7 +125,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue';
-import { DeleteTwo, CloseOne } from '@icon-park/vue-next';
+import { CloseOne } from '@icon-park/vue-next';
 
 const localFilesList = ref([]);
 const receivedFileList = ref([]);
@@ -135,6 +149,28 @@ const configuration = ref({
 
 const switchFunction = (tab) => {
   activeTab.value = tab;
+};
+
+const clearFiles = () => {
+  localFilesList.value = [];
+};
+
+const handleDrop = (e) => {
+  const files = e.dataTransfer.files;
+  if (files.length > 0) {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+
+      // 添加到本地文件列表
+      localFilesList.value.push({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        file: file, // 保存文件对象本身，以便后续发送
+        date: new Date().toLocaleString(),
+      });
+    }
+  }
 };
 
 const handleDeleteFile = (index) => {
@@ -335,6 +371,9 @@ function onReceiveChannelMessageCallback(event) {
           fileInfo.value.name,
           { type: fileInfo.value.type }
         );
+        // const a = document.createElement('a');
+        // a.href = URL.createObjectURL(receivedFile);
+        // a.download = receivedFile.name;
         console.log('received file:', receivedFile);
         receivedFileList.value = [...receivedFileList.value, receivedFile];
       }
@@ -537,11 +576,13 @@ onMounted(() => {
 
       .file-container {
         .file-list {
-          width: 100%;
+          width: 98%;
+          height: 200px;
+          overflow: auto;
           margin: 0 20px;
 
           .has-receive {
-            margin-bottom: 20px;
+            margin-bottom: 10px;
           }
 
           .has-send {
@@ -562,6 +603,14 @@ onMounted(() => {
               color: #4a4a4a;
               font-size: 14px;
               padding: 5px 8px;
+
+              a {
+                text-decoration: none;
+
+                &:hover {
+                  cursor: pointer;
+                }
+              }
             }
 
             .file-details {
