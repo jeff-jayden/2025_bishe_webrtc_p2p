@@ -222,21 +222,6 @@ async function createPeerConnection() {
   };
 }
 
-async function handleOffer(offer) {
-  console.log('handleOffer------');
-  if (pc.value) {
-    console.error('existing peerconnection');
-    return;
-  }
-  await createPeerConnection();
-  pc.value.ondatachannel = receiveChannelCallback;
-  await pc.value.setRemoteDescription(offer);
-
-  const answer = await pc.value.createAnswer();
-  signaling.value.postMessage({ type: 'answer', sdp: answer.sdp });
-  await pc.value.setLocalDescription(answer);
-}
-
 async function handleAnswer(answer) {
   console.log('handleAnswer------');
   if (!pc.value) {
@@ -260,7 +245,40 @@ async function handleCandidate(candidate) {
   }
 }
 
-function sendData() {
+const handleSendFn = async (channel, fileInfo, data) => {
+  channel.value.send(
+    JSON.stringify({
+      type: 'file-info',
+      data: fileInfo,
+    })
+  );
+
+  const chunkSize = 16384;
+  fileReader.value = new FileReader();
+  let offset = 0;
+  fileReader.value.addEventListener('error', (error) =>
+    console.error('Error reading file:', error)
+  );
+  fileReader.value.addEventListener('abort', (event) =>
+    console.log('File reading aborted:', event)
+  );
+  fileReader.value.addEventListener('load', (e) => {
+    console.log('FileRead.onload ', e);
+    channel.value.send(e.target.result);
+    offset += e.target.result.byteLength;
+    if (offset < data.size) {
+      readSlice(offset);
+    }
+  });
+  const readSlice = (o) => {
+    console.log('readSlice ', o);
+    const slice = data.slice(offset, o + chunkSize);
+    fileReader.value.readAsArrayBuffer(slice);
+  };
+  readSlice(0);
+};
+
+async function sendData() {
   for (const item of localFilesList.value) {
     const data = item.file;
     console.log(
@@ -272,71 +290,30 @@ function sendData() {
       size: data.size,
       type: data.type,
     };
+    //如果是发送方，那就是sendChannel
     if (sendChannel.value) {
-      sendChannel.value.send(
-        JSON.stringify({
-          type: 'file-info',
-          data: fileInfo,
-        })
-      );
-
-      const chunkSize = 16384;
-      fileReader.value = new FileReader();
-      let offset = 0;
-      fileReader.value.addEventListener('error', (error) =>
-        console.error('Error reading file:', error)
-      );
-      fileReader.value.addEventListener('abort', (event) =>
-        console.log('File reading aborted:', event)
-      );
-      fileReader.value.addEventListener('load', (e) => {
-        console.log('FileRead.onload ', e);
-        sendChannel.value.send(e.target.result);
-        offset += e.target.result.byteLength;
-        if (offset < data.size) {
-          readSlice(offset);
-        }
-      });
-      const readSlice = (o) => {
-        console.log('readSlice ', o);
-        const slice = data.slice(offset, o + chunkSize);
-        fileReader.value.readAsArrayBuffer(slice);
-      };
-      readSlice(0);
+      await handleSendFn(sendChannel, fileInfo, data);
     } else {
-      receiveChannel.value.send(
-        JSON.stringify({
-          type: 'file-info',
-          data: fileInfo,
-        })
-      );
-
-      const chunkSize = 16384;
-      fileReader.value = new FileReader();
-      let offset = 0;
-      fileReader.value.addEventListener('error', (error) =>
-        console.error('Error reading file:', error)
-      );
-      fileReader.value.addEventListener('abort', (event) =>
-        console.log('File reading aborted:', event)
-      );
-      fileReader.value.addEventListener('load', (e) => {
-        console.log('FileRead.onload ', e);
-        receiveChannel.value.send(e.target.result);
-        offset += e.target.result.byteLength;
-        if (offset < data.size) {
-          readSlice(offset);
-        }
-      });
-      const readSlice = (o) => {
-        console.log('readSlice ', o);
-        const slice = data.slice(offset, o + chunkSize);
-        fileReader.value.readAsArrayBuffer(slice);
-      };
-      readSlice(0);
+      // 否则就是接受方发送，那就是receiveChannel
+      await handleSendFn(receiveChannel, fileInfo, data);
+      console.log('Sent Data: ', data);
     }
-    console.log('Sent Data: ', data);
   }
+}
+
+async function handleOffer(offer) {
+  console.log('handleOffer------');
+  if (pc.value) {
+    console.error('existing peerconnection');
+    return;
+  }
+  await createPeerConnection();
+  pc.value.ondatachannel = receiveChannelCallback;
+  await pc.value.setRemoteDescription(offer);
+
+  const answer = await pc.value.createAnswer();
+  signaling.value.postMessage({ type: 'answer', sdp: answer.sdp });
+  await pc.value.setLocalDescription(answer);
 }
 
 function receiveChannelCallback(event) {
