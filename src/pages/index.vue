@@ -93,6 +93,15 @@
         :receiveChannel="receiveChannel"
         ref="transtextRef"
       />
+      <Transvideo
+        v-if="activeTab === 'video'"
+        :sendChannel="sendChannel"
+        :receiveChannel="receiveChannel"
+        :pc="pc"
+        :signaling="signaling"
+        ref="transvideoRef"
+        @handleChangeSdp="handleChangeSdp"
+      />
     </div>
   </div>
 </template>
@@ -104,14 +113,16 @@ import {
   FileText,
   CastScreen,
   PhoneVideoCall,
+  Log,
 } from '@icon-park/vue-next';
 import Transfile from '@/components/transfile.vue';
 import Transtext from '@/components/transtext.vue';
+import Transvideo from '@/components/transvideo.vue';
 
 const receivedFileChunks = ref({});
 const receivedFileSizes = ref({});
 const receivedFileList = ref([]);
-const activeTab = ref('text');
+const activeTab = ref('video');
 const pc = ref();
 const signaling = ref();
 const sendChannel = ref();
@@ -133,6 +144,7 @@ const switchFunction = (tab) => {
 
   nextTick(() => {
     // 切换标签时重新设置数据通道的事件处理程序
+    // 接收渠道设置
     if (receiveChannel.value) {
       console.log('有receiveChannel');
       console.log('tab', tab);
@@ -153,9 +165,21 @@ const switchFunction = (tab) => {
             console.error('解析消息失败:', error);
           }
         };
+      } else if (tab === 'video' && transvideoRef.value) {
+        console.log('切换为video');
+        receiveChannel.value.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            console.log('receiveChannel', message);
+            transvideoRef.value.handleReceivedMessage(message);
+          } catch (error) {
+            console.error('解析视频消息失败:', error);
+          }
+        };
       }
     }
 
+    // 发送渠道设置
     if (sendChannel.value) {
       console.log('有sendChannel');
       console.log('tab', tab);
@@ -176,6 +200,18 @@ const switchFunction = (tab) => {
             console.error('解析消息失败:', error);
           }
         };
+      } else if (tab === 'video' && transvideoRef.value) {
+        console.log('切换为video');
+
+        sendChannel.value.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            console.log('sendChannel', message);
+            transvideoRef.value.handleReceivedMessage(message);
+          } catch (error) {
+            console.error('解析视频消息失败:', error);
+          }
+        };
       }
     }
   });
@@ -184,6 +220,7 @@ const switchFunction = (tab) => {
 // 引用组件
 const transfileRef = ref(null);
 const transtextRef = ref(null);
+const transvideoRef = ref(null);
 
 // 清空文件列表
 const clearFiles = () => {
@@ -197,6 +234,12 @@ const selectFile = () => {
   if (transfileRef.value) {
     transfileRef.value.selectFile();
   }
+};
+
+const handleChangeSdp = (offer) => {
+  console.log('handleChangeSdp', offer);
+
+  signaling.value.postMessage({ type: 'offer', sdp: offer.sdp });
 };
 
 async function createPeerConnection() {
@@ -215,6 +258,26 @@ async function createPeerConnection() {
     console.log('message', message);
     signaling.value.postMessage(message);
   };
+  if (activeTab.value === 'video' && transvideoRef.value) {
+    console.log('执行了ontrack事件');
+
+    pc.value.ontrack = (event) => {
+      console.log('ontrack事件触发');
+      console.log('event', event);
+
+      if (event.streams && event.streams[0]) {
+        transvideoRef.value.remoteVideo.srcObject = event.streams[0];
+      }
+    };
+    const stream = transvideoRef.value.stream;
+    stream.getTracks().forEach((track) => {
+      console.log('track', track);
+
+      pc.value.addTrack(track, stream);
+    });
+
+    console.log('pc', pc.value);
+  }
 }
 
 // 发送方设置接收方的连接信息
@@ -244,16 +307,16 @@ async function handleCandidate(candidate) {
 // 接收方
 async function handleOffer(offer) {
   console.log('handleOffer------');
-  if (pc.value) {
-    console.error('existing peerconnection');
-    return;
-  }
+  // if (pc.value) {
+  //   console.error('existing peerconnection');
+  //   return;
+  // }
   await createPeerConnection();
   pc.value.ondatachannel = receiveChannelCallback;
   // 接收方设置发送方的连接信息
   await pc.value.setRemoteDescription(offer);
 
-  // 创建接受方的连接信息
+  // 创建接受方的连接信息   这时候应该还是旧的answer
   const answer = await pc.value.createAnswer();
   signaling.value.postMessage({ type: 'answer', sdp: answer.sdp });
   await pc.value.setLocalDescription(answer);
@@ -283,6 +346,16 @@ function receiveChannelCallback(event) {
         console.error('解析消息失败:', error);
       }
     };
+  } else if (activeTab.value === 'video' && transvideoRef.value) {
+    receiveChannel.value.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        console.log('receiveChannel 执行', message);
+        transvideoRef.value.handleReceivedMessage(message);
+      } catch (error) {
+        console.error('解析消息失败:', error);
+      }
+    };
   }
 }
 
@@ -307,6 +380,16 @@ const startFn = async () => {
         console.error('解析消息失败:', error);
       }
     };
+  } else if (activeTab.value === 'video' && transvideoRef.value) {
+    sendChannel.value.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        console.log('sendChannel', message);
+        transvideoRef.value.handleReceivedMessage(message);
+      } catch (error) {
+        console.error('解析消息失败:', error);
+      }
+    };
   }
 
   // 创建发送方的连接信息
@@ -319,6 +402,10 @@ onMounted(() => {
   console.log('开始执行');
   signaling.value = new BroadcastChannel('webrtc');
   signaling.value.onmessage = (e) => {
+    if (activeTab.value === 'video' && !transvideoRef.value.stream) {
+      console.log('not ready yet');
+      return;
+    }
     switch (e.data.type) {
       case 'offer':
         handleOffer(e.data);
@@ -348,7 +435,9 @@ onMounted(() => {
         break;
     }
   };
-  signaling.value.postMessage({ type: 'ready' });
+  if (activeTab.value !== 'video') {
+    signaling.value.postMessage({ type: 'ready' });
+  }
 });
 </script>
 
