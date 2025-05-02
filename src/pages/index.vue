@@ -78,6 +78,7 @@
         </div>
       </div>
       <Transfile
+        v-if="activeTab === 'file'"
         :receivedFileList="receivedFileList"
         :sendChannel="sendChannel"
         :receiveChannel="receiveChannel"
@@ -86,12 +87,18 @@
         :receivedFileSizes="receivedFileSizes"
         ref="transfileRef"
       />
+      <Transtext
+        v-if="activeTab === 'text'"
+        :sendChannel="sendChannel"
+        :receiveChannel="receiveChannel"
+        ref="transtextRef"
+      />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch, nextTick } from 'vue';
 import {
   UploadOne,
   FileText,
@@ -99,12 +106,12 @@ import {
   PhoneVideoCall,
 } from '@icon-park/vue-next';
 import Transfile from '@/components/transfile.vue';
-
+import Transtext from '@/components/transtext.vue';
 
 const receivedFileChunks = ref({});
 const receivedFileSizes = ref({});
 const receivedFileList = ref([]);
-const activeTab = ref('file');
+const activeTab = ref('text');
 const pc = ref();
 const signaling = ref();
 const sendChannel = ref();
@@ -121,10 +128,62 @@ const configuration = ref({
 
 const switchFunction = (tab) => {
   activeTab.value = tab;
+
+  console.log('切换中...');
+
+  nextTick(() => {
+    // 切换标签时重新设置数据通道的事件处理程序
+    if (receiveChannel.value) {
+      console.log('有receiveChannel');
+      console.log('tab', tab);
+      if (tab === 'file' && transfileRef.value) {
+        receiveChannel.value.onmessage =
+          transfileRef.value.onReceiveChannelMessageCallback;
+        receiveChannel.value.onopen =
+          transfileRef.value.onReceiveChannelStateChange;
+        receiveChannel.value.onclose =
+          transfileRef.value.onReceiveChannelStateChange;
+      } else if (tab === 'text' && transtextRef.value) {
+        console.log('切换为text');
+        receiveChannel.value.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            transtextRef.value.onTextMessageReceived(message);
+          } catch (error) {
+            console.error('解析消息失败:', error);
+          }
+        };
+      }
+    }
+
+    if (sendChannel.value) {
+      console.log('有sendChannel');
+      console.log('tab', tab);
+
+      if (tab === 'file' && transfileRef.value) {
+        sendChannel.value.onopen = transfileRef.value.onSendChannelStateChange;
+        sendChannel.value.onmessage =
+          transfileRef.value.onSendChannelMessageCallback;
+        sendChannel.value.onclose = transfileRef.value.onSendChannelStateChange;
+      } else if (tab === 'text' && transtextRef.value) {
+        console.log('切换为text');
+
+        sendChannel.value.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            transtextRef.value.onTextMessageReceived(message);
+          } catch (error) {
+            console.error('解析消息失败:', error);
+          }
+        };
+      }
+    }
+  });
 };
 
-// 引用transfile组件
+// 引用组件
 const transfileRef = ref(null);
+const transtextRef = ref(null);
 
 // 清空文件列表
 const clearFiles = () => {
@@ -206,15 +265,26 @@ function receiveChannelCallback(event) {
   console.log('Receive Channel Callback');
   receiveChannel.value = event.channel;
 
-  // 通道事件处理将在transfile组件中设置
-  if (transfileRef.value) {
-    receiveChannel.value.onmessage = transfileRef.value.onReceiveChannelMessageCallback;
-    receiveChannel.value.onopen = transfileRef.value.onReceiveChannelStateChange;
-    receiveChannel.value.onclose = transfileRef.value.onReceiveChannelStateChange;
+  // 通道事件处理将在组件中设置
+  if (activeTab.value === 'file' && transfileRef.value) {
+    receiveChannel.value.onmessage =
+      transfileRef.value.onReceiveChannelMessageCallback;
+    receiveChannel.value.onopen =
+      transfileRef.value.onReceiveChannelStateChange;
+    receiveChannel.value.onclose =
+      transfileRef.value.onReceiveChannelStateChange;
+  } else if (activeTab.value === 'text' && transtextRef.value) {
+    receiveChannel.value.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        console.log('receiveChannel 执行', message);
+        transtextRef.value.onTextMessageReceived(message);
+      } catch (error) {
+        console.error('解析消息失败:', error);
+      }
+    };
   }
 }
-
-// 这些函数已经迁移到transfile组件中
 
 // 开始创建连接入口  发送方
 const startFn = async () => {
@@ -222,11 +292,21 @@ const startFn = async () => {
   await createPeerConnection();
   sendChannel.value = pc.value.createDataChannel('sendDataChannel');
 
-  // 通道事件处理将在transfile组件中设置
-  if (transfileRef.value) {
+  // 通道事件处理将在组件中设置
+  if (activeTab.value === 'file' && transfileRef.value) {
     sendChannel.value.onopen = transfileRef.value.onSendChannelStateChange;
-    sendChannel.value.onmessage = transfileRef.value.onSendChannelMessageCallback;
+    sendChannel.value.onmessage =
+      transfileRef.value.onSendChannelMessageCallback;
     sendChannel.value.onclose = transfileRef.value.onSendChannelStateChange;
+  } else if (activeTab.value === 'text' && transtextRef.value) {
+    sendChannel.value.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        transtextRef.value.onTextMessageReceived(message);
+      } catch (error) {
+        console.error('解析消息失败:', error);
+      }
+    };
   }
 
   // 创建发送方的连接信息
@@ -342,8 +422,6 @@ onMounted(() => {
         align-items: center;
       }
     }
-
-
   }
 }
 </style>
