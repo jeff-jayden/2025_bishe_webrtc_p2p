@@ -107,8 +107,6 @@ defineExpose({
 
 <style scoped lang="less">
 .transvideo {
-  width: 100%;
-  height: 100%;
   display: flex;
   flex-direction: column;
 
@@ -119,8 +117,8 @@ defineExpose({
 
     .video_left,
     .video_right {
-      width: 40%;
-      height: 80%;
+      width: 600px;
+      height: 400px;
       position: relative;
       border: 1px solid #dcdfe6;
       border-radius: 8px;
@@ -138,8 +136,8 @@ defineExpose({
       }
 
       video {
-        width: 100%;
-        height: 100%;
+        width: 600px;
+        height: 400px;
         object-fit: cover;
         background-color: #f5f7fa;
       }
@@ -156,8 +154,8 @@ defineExpose({
 
   .controls {
     display: flex;
-    justify-content: center;
-    margin-top: 20px;
+    justify-content: flex-start;
+    margin: 20px 0 0 50px;
     gap: 20px;
   }
 }

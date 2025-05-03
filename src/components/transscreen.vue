@@ -46,14 +46,18 @@ const startScreenShare = async () => {
 };
 
 const stopScreenShare = () => {
+  props.signaling.postMessage({ type: 'bye' });
+
   if (stream.value) {
     stream.value.getTracks().forEach((track) => track.stop());
     stream.value = null;
     localVideo.value.srcObject = null;
   }
-  if (props.pc) {
-    props.pc.close();
-    props.pc = null;
+
+  // 清除远程视频
+  if (remoteVideo.value && remoteVideo.value.srcObject) {
+    remoteVideo.value.srcObject.getTracks().forEach((track) => track.stop());
+    remoteVideo.value.srcObject = null;
   }
 };
 
@@ -61,6 +65,7 @@ defineExpose({
   stream,
   localVideo,
   remoteVideo,
+  stopScreenShare
 });
 
 onUnmounted(() => {
@@ -72,13 +77,14 @@ onUnmounted(() => {
 .transscreen-container {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-around;
+  padding: 10px;
 }
 
 .local-video,
 .remote-video {
-  width: 200px;
-  height: 200px;
+  width: 600px;
+  height: 400px;
   border: 1px solid #ddd;
   border-radius: 4px;
 }
@@ -86,5 +92,6 @@ onUnmounted(() => {
 .control-buttons {
   display: flex;
   gap: 10px;
+  margin-left: 40px;
 }
 </style>

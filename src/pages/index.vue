@@ -441,7 +441,12 @@ const hangup = () => {
     pc.value.close();
     pc.value = null;
   }
-  transvideoRef.value.endVideoCall();
+  if(activeTab.value === 'video' && transvideoRef.value) {
+    transvideoRef.value.endVideoCall();
+  }
+  if(activeTab.value === 'screen' && transscreenRef.value) {
+    transscreenRef.value.stopScreenShare();
+  }
 };
 
 onMounted(() => {
