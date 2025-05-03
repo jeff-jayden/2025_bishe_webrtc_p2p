@@ -95,12 +95,8 @@
       />
       <Transvideo
         v-if="activeTab === 'video'"
-        :sendChannel="sendChannel"
-        :receiveChannel="receiveChannel"
-        :pc="pc"
         :signaling="signaling"
         ref="transvideoRef"
-        @handleChangeSdp="handleChangeSdp"
       />
     </div>
   </div>
@@ -145,6 +141,8 @@ const switchFunction = (tab) => {
   nextTick(() => {
     // 切换标签时重新设置数据通道的事件处理程序
     // 接收渠道设置
+    signaling.value.postMessage({ type: 'ready' })
+
     if (receiveChannel.value) {
       console.log('有receiveChannel');
       console.log('tab', tab);
@@ -165,18 +163,21 @@ const switchFunction = (tab) => {
             console.error('解析消息失败:', error);
           }
         };
-      } else if (tab === 'video' && transvideoRef.value) {
-        console.log('切换为video');
-        receiveChannel.value.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            console.log('receiveChannel', message);
-            transvideoRef.value.handleReceivedMessage(message);
-          } catch (error) {
-            console.error('解析视频消息失败:', error);
-          }
-        };
       }
+      /**
+       * else if (tab === 'video' && transvideoRef.value) {
+       *         console.log('切换为video');
+       *         receiveChannel.value.onmessage = (event) => {
+       *           try {
+       *             const message = JSON.parse(event.data);
+       *             console.log('receiveChannel', message);
+       *             transvideoRef.value.handleReceivedMessage(message);
+       *           } catch (error) {
+       *             console.error('解析视频消息失败:', error);
+       *           }
+       *         };
+       *       }
+       */
     }
 
     // 发送渠道设置
@@ -200,7 +201,9 @@ const switchFunction = (tab) => {
             console.error('解析消息失败:', error);
           }
         };
-      } else if (tab === 'video' && transvideoRef.value) {
+      }
+      /**
+       * else if (tab === 'video' && transvideoRef.value) {
         console.log('切换为video');
 
         sendChannel.value.onmessage = (event) => {
@@ -213,6 +216,7 @@ const switchFunction = (tab) => {
           }
         };
       }
+       */
     }
   });
 };
@@ -346,7 +350,9 @@ function receiveChannelCallback(event) {
         console.error('解析消息失败:', error);
       }
     };
-  } else if (activeTab.value === 'video' && transvideoRef.value) {
+  }
+  /**
+   * else if (activeTab.value === 'video' && transvideoRef.value) {
     receiveChannel.value.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
@@ -357,6 +363,7 @@ function receiveChannelCallback(event) {
       }
     };
   }
+   */
 }
 
 // 开始创建连接入口  发送方
@@ -380,7 +387,9 @@ const startFn = async () => {
         console.error('解析消息失败:', error);
       }
     };
-  } else if (activeTab.value === 'video' && transvideoRef.value) {
+  }
+  /**
+   * else if (activeTab.value === 'video' && transvideoRef.value) {
     sendChannel.value.onmessage = (event) => {
       try {
         const message = JSON.parse(event.data);
@@ -391,12 +400,22 @@ const startFn = async () => {
       }
     };
   }
+   *
+   * */
 
   // 创建发送方的连接信息
   const offer = await pc.value.createOffer();
   signaling.value.postMessage({ type: 'offer', sdp: offer.sdp });
   await pc.value.setLocalDescription(offer);
 };
+
+const hangup = () => {
+  if (pc.value) {
+    pc.value.close();
+    pc.value = null;
+  }
+  transvideoRef.value.endVideoCall();
+}
 
 onMounted(() => {
   console.log('开始执行');
