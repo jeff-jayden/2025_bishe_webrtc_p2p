@@ -98,27 +98,33 @@
         :signaling="signaling"
         ref="transvideoRef"
       />
+      <Transscreen
+        v-if="activeTab === 'screen'"
+        :signaling="signaling"
+        :pc="pc"
+        ref="transscreenRef"
+      />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue';
+import { ref, onMounted, nextTick } from 'vue';
 import {
   UploadOne,
   FileText,
   CastScreen,
   PhoneVideoCall,
-  Log,
 } from '@icon-park/vue-next';
 import Transfile from '@/components/transfile.vue';
 import Transtext from '@/components/transtext.vue';
 import Transvideo from '@/components/transvideo.vue';
+import Transscreen from '@/components/transscreen.vue';
 
 const receivedFileChunks = ref({});
 const receivedFileSizes = ref({});
 const receivedFileList = ref([]);
-const activeTab = ref('video');
+const activeTab = ref('screen');
 const pc = ref();
 const signaling = ref();
 const sendChannel = ref();
@@ -141,7 +147,7 @@ const switchFunction = (tab) => {
   nextTick(() => {
     // 切换标签时重新设置数据通道的事件处理程序
     // 接收渠道设置
-    signaling.value.postMessage({ type: 'ready' })
+    signaling.value.postMessage({ type: 'ready' });
 
     if (receiveChannel.value) {
       console.log('有receiveChannel');
@@ -225,6 +231,7 @@ const switchFunction = (tab) => {
 const transfileRef = ref(null);
 const transtextRef = ref(null);
 const transvideoRef = ref(null);
+const transscreenRef = ref(null);
 
 // 清空文件列表
 const clearFiles = () => {
@@ -274,6 +281,26 @@ async function createPeerConnection() {
       }
     };
     const stream = transvideoRef.value.stream;
+    stream.getTracks().forEach((track) => {
+      console.log('track', track);
+
+      pc.value.addTrack(track, stream);
+    });
+
+    console.log('pc', pc.value);
+  }
+  if (activeTab.value === 'screen' && transscreenRef.value) {
+    console.log('执行了ontrack事件');
+
+    pc.value.ontrack = (event) => {
+      console.log('ontrack事件触发');
+      console.log('event', event);
+
+      if (event.streams && event.streams[0]) {
+        transscreenRef.value.remoteVideo.srcObject = event.streams[0];
+      }
+    };
+    const stream = transscreenRef.value.stream;
     stream.getTracks().forEach((track) => {
       console.log('track', track);
 
@@ -415,13 +442,17 @@ const hangup = () => {
     pc.value = null;
   }
   transvideoRef.value.endVideoCall();
-}
+};
 
 onMounted(() => {
   console.log('开始执行');
   signaling.value = new BroadcastChannel('webrtc');
   signaling.value.onmessage = (e) => {
     if (activeTab.value === 'video' && !transvideoRef.value.stream) {
+      console.log('not ready yet');
+      return;
+    }
+    if (activeTab.value === 'screen' && !transscreenRef.value.stream) {
       console.log('not ready yet');
       return;
     }
