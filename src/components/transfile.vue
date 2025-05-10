@@ -12,8 +12,8 @@
       </div>
     </div>
     <div class="file-container">
+      <div class="has-send">已发送文件</div>
       <div class="file-list" v-if="localFilesList.length">
-        <div class="has-send">已发送文件</div>
         <div
           v-for="(file, index) in localFilesList"
           :key="index"
@@ -22,6 +22,10 @@
           <div class="file-name">{{ file.name }}</div>
           <div class="file-details">
             <div class="size">{{ (file.size / 1024).toFixed(2) }} KB</div>
+            <el-progress
+              :percentage="currentTransfersInner[file.name]?.progress"
+              class="progress"
+            />
             <div class="delete_btn" @click="handleDeleteFile(index)">
               <el-tooltip content="sure delete???" placement="top"
                 ><close-one class="close" theme="outline" size="16"
@@ -30,8 +34,8 @@
           </div>
         </div>
       </div>
+      <div class="has-receive">已收到文件</div>
       <div class="file-list" v-if="receivedFileList.length">
-        <div class="has-receive">已收到文件</div>
         <div
           v-for="(file, index) in receivedFileList"
           :key="index"
@@ -64,6 +68,7 @@
 <script setup>
 import { CloseOne } from '@icon-park/vue-next';
 import { ref, onMounted } from 'vue';
+import { encryptData, decryptData } from '@/utils/crypto';
 
 // 获取URL对象，用于创建文件下载链接
 const URL = window.URL || window.webkitURL;
@@ -72,6 +77,7 @@ const transferQueue = ref([]);
 const fileReaders = ref({});
 const localFilesList = ref([]);
 const maxParallelTransfers = 3; // 最大并行传输数量
+const currentTransfersInner = ref({});
 
 const props = defineProps({
   receivedFileList: Array,
@@ -82,8 +88,7 @@ const props = defineProps({
   receivedFileSizes: Object,
 });
 
-// 文件接收处理函数
-function onReceiveChannelMessageCallback(event) {
+async function onReceiveChannelMessageCallback(event) {
   console.log('Received Message');
 
   const data = event.data;
@@ -97,14 +102,18 @@ function onReceiveChannelMessageCallback(event) {
         // 新文件传输开始，初始化接收状态
         const transferId = message.transferId;
         props.receivedFileChunks[transferId] = [];
-        props.receivedFileSizes[transferId] = 0;
+        // 从文件信息中获取已上传大小作为接收的起始大小
+        props.receivedFileSizes[transferId] = message.uploadedSize || 0;
 
         // 保存文件信息
         props.currentTransfers[transferId] = {
           id: transferId,
           fileInfo: message.data,
-          progress: 0,
+          progress: Math.floor(
+            (props.receivedFileSizes[transferId] / message.data.size) * 100
+          ),
           status: 'receiving',
+          uploadedSize: message.uploadedSize || 0, // 保存已上传大小
         };
       } else if (message.type === 'chunk-info') {
         // 这是一个数据块的元信息，下一个消息将是实际数据
@@ -133,6 +142,8 @@ function onReceiveChannelMessageCallback(event) {
         props.receivedFileChunks[activeTransferId] = [];
       }
 
+      // 解密数据块
+      // const decryptedData = await decryptData(data);
       props.receivedFileChunks[activeTransferId].push(data);
 
       // 更新已接收大小
@@ -244,13 +255,11 @@ function onReceiveChannelStateChange() {
   }
 }
 
-const handleSendFn = async (channel, fileInfo, data) => {
+const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
   // 生成唯一的传输ID
-  const transferId = `${fileInfo.name}-${Date.now()}-${Math.random()
-    .toString(36)
-    .substr(2, 9)}`;
+  const transferId = `${fileInfo.name}`;
 
-  // 发送文件信息，包含传输ID
+  // 发送文件信息，包含传输ID和加密标志
   console.log('channel', channel);
 
   channel.send(
@@ -258,16 +267,21 @@ const handleSendFn = async (channel, fileInfo, data) => {
       type: 'file-info',
       transferId: transferId,
       data: fileInfo,
+      encrypted: true,
+      uploadedSize: uploadedSize, // 发送已上传大小
     })
   );
 
   // 记录当前传输
-  props.currentTransfers[transferId] = {
+  const info = {
     id: transferId,
     file: data,
     progress: 0,
     status: 'transferring',
+    uploadedSize: uploadedSize,
   };
+  currentTransfersInner.value[transferId] = info;
+  props.currentTransfers[transferId] = info;
 
   const chunkSize = 16384;
   fileReaders.value[transferId] = new FileReader();
@@ -305,7 +319,6 @@ const handleSendFn = async (channel, fileInfo, data) => {
 
     try {
       channel.send(item);
-
       // 发送完成后处理下一个
       sendingInProgress = false;
       processSendQueue();
@@ -331,7 +344,7 @@ const handleSendFn = async (channel, fileInfo, data) => {
   // 当缓冲区低于阈值时继续发送
   channel.onbufferedamountlow = processSendQueue;
 
-  fileReaders.value[transferId].addEventListener('load', (e) => {
+  fileReaders.value[transferId].addEventListener('load', async (e) => {
     // 准备元数据
     const chunkInfo = JSON.stringify({
       type: 'chunk-info',
@@ -340,6 +353,9 @@ const handleSendFn = async (channel, fileInfo, data) => {
       size: e.target.result.byteLength,
     });
 
+    // 加密数据块
+    // const encryptedChunk = await encryptData(e.target.result);
+
     // 将元数据和实际数据添加到发送队列
     queueDataForSend(chunkInfo);
     queueDataForSend(e.target.result);
@@ -347,10 +363,11 @@ const handleSendFn = async (channel, fileInfo, data) => {
     offset += e.target.result.byteLength;
 
     // 更新进度
-    if (props.currentTransfers[transferId]) {
-      props.currentTransfers[transferId].progress = Math.floor(
+    if (currentTransfersInner.value[transferId]) {
+      currentTransfersInner.value[transferId].progress = Math.floor(
         (offset / data.size) * 100
       );
+      currentTransfersInner.value[transferId].uploadedSize = offset;
     }
 
     if (offset < data.size) {
@@ -367,11 +384,7 @@ const handleSendFn = async (channel, fileInfo, data) => {
       }
     } else {
       // 传输完成
-      if (props.currentTransfers[transferId]) {
-        props.currentTransfers[transferId].status = 'completed';
-      }
-
-      // 从当前传输列表中移除
+      console.log('传输完成');
       setTimeout(() => {
         delete fileReaders.value[transferId];
         delete props.currentTransfers[transferId];
@@ -387,7 +400,7 @@ const handleSendFn = async (channel, fileInfo, data) => {
     fileReaders.value[transferId].readAsArrayBuffer(slice);
   };
 
-  readSlice(0);
+  readSlice(uploadedSize);
 };
 
 /**
@@ -395,6 +408,7 @@ const handleSendFn = async (channel, fileInfo, data) => {
  * 并发限制传输任务，在传输单个任务的时候切片，确保完成再启动一下个，然后中间可能会出现发送太快的
  * 情况，可以也搞一个缓存队列，搞个缓存区去判断执行是不是要发送碎片
  */
+// 处理发送文件功能
 function sendData() {
   // 清空传输队列
   transferQueue.value = [];
@@ -416,13 +430,15 @@ function sendData() {
   for (let i = 0; i < initialBatchSize; i++) {
     const item = filesToSend[i];
     const data = item.file;
+    const uploadedSize = item.uploadedSize || 0; // 获取已上传大小
+
     console.log(
       `开始发送文件: ${[
         data.name,
         data.size,
         data.type,
         data.lastModified,
-      ].join(' ')}`
+      ].join(' ')}, 已上传: ${uploadedSize} 字节`
     );
 
     const fileInfo = {
@@ -432,7 +448,7 @@ function sendData() {
     };
 
     // 开始传输
-    handleSendFn(channel, fileInfo, data);
+    handleSendFn(channel, fileInfo, data, uploadedSize);
   }
 
   // 将剩余文件添加到队列
@@ -446,6 +462,7 @@ function sendData() {
         type: item.file.type,
       },
       data: item.file,
+      uploadedSize: item.uploadedSize || 0, // 保存已上传大小到队列
     });
   }
 
@@ -470,8 +487,8 @@ const processNextInQueue = () => {
     const nextTransfer = transferQueue.value.shift();
 
     if (nextTransfer) {
-      const { channel, fileInfo, data } = nextTransfer;
-      handleSendFn(channel, fileInfo, data);
+      const { channel, fileInfo, data, uploadedSize } = nextTransfer;
+      handleSendFn(channel, fileInfo, data, uploadedSize);
     }
   }
 };
@@ -489,6 +506,8 @@ const handleDrop = (e) => {
         type: file.type,
         file: file, // 保存文件对象本身，以便后续发送
         date: new Date().toLocaleString(),
+        progress: 0, // 初始化进度为0
+        uploadedSize: 0, // 初始化已上传大小
       });
     }
   }
@@ -518,6 +537,8 @@ const selectFile = () => {
         type: file.type,
         file: file, // 保存文件对象本身，以便后续发送
         date: new Date().toLocaleString(),
+        progress: 0, // 初始化进度为0
+        uploadedSize: 0, // 初始化已上传大小为0
       });
     }
   };
@@ -558,22 +579,22 @@ onMounted(() => {
 });
 </script>
 
-<style scoped>
+<style scoped lang="less">
 .transfer-file {
   height: 100%;
   width: 100%;
+  position: relative;
 
   /* 拖放区域 */
   .drop-area {
     display: flex;
     justify-content: center;
     align-items: center;
-    height: 300px;
+    height: 220px;
     background-color: #fafafa;
     border: 2px dashed #ddd;
     border-radius: 8px;
     margin: 20px;
-    padding: 60px 20px;
     text-align: center;
     cursor: pointer;
     transition: all 0.3s;
@@ -591,8 +612,8 @@ onMounted(() => {
 
   .file-container {
     .file-list {
-      width: 98%;
-      height: 200px;
+      width: 97%;
+      height: 155px;
       overflow: auto;
       margin: 0 20px;
 
@@ -608,10 +629,10 @@ onMounted(() => {
         display: flex;
         flex: 1;
         align-items: center;
+        justify-content: space-between;
         padding: 5px 8px;
         border: 1px solid #eee;
         border-radius: 8px;
-        width: fit-content;
         margin-bottom: 10px;
 
         .file-name {
@@ -632,8 +653,13 @@ onMounted(() => {
         .file-details {
           color: #888;
           font-size: 12px;
-
           display: flex;
+          margin-right: 50px;
+
+          .progress {
+            width: 150px;
+            margin-left: 5px;
+          }
 
           .size {
             background-color: #fafafa;
@@ -667,6 +693,8 @@ onMounted(() => {
   .bottom {
     height: 70px;
     margin-top: 10px;
+    position: absolute;
+    bottom: 100px;
 
     .btn {
       margin-left: 20px;

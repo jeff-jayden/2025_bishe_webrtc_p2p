@@ -7,6 +7,10 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+docs
+docs-html
+img.png
+mermaid-docs.config
 node_modules
 dist
 dist-ssr

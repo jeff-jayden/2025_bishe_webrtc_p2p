@@ -124,7 +124,7 @@ import Transscreen from '@/components/transscreen.vue';
 const receivedFileChunks = ref({});
 const receivedFileSizes = ref({});
 const receivedFileList = ref([]);
-const activeTab = ref('screen');
+const activeTab = ref('file');
 const pc = ref();
 const signaling = ref();
 const sendChannel = ref();
@@ -138,6 +138,26 @@ const configuration = ref({
     { urls: 'stun:stun1.l.google.com:19302' },
   ],
 });
+
+// 引用组件
+const transfileRef = ref(null);
+const transtextRef = ref(null);
+const transvideoRef = ref(null);
+const transscreenRef = ref(null);
+
+// 清空文件列表
+const clearFiles = () => {
+  if (transfileRef.value) {
+    transfileRef.value.clearFiles();
+  }
+};
+
+// 选择文件
+const selectFile = () => {
+  if (transfileRef.value) {
+    transfileRef.value.selectFile();
+  }
+};
 
 const switchFunction = (tab) => {
   activeTab.value = tab;
@@ -170,20 +190,6 @@ const switchFunction = (tab) => {
           }
         };
       }
-      /**
-       * else if (tab === 'video' && transvideoRef.value) {
-       *         console.log('切换为video');
-       *         receiveChannel.value.onmessage = (event) => {
-       *           try {
-       *             const message = JSON.parse(event.data);
-       *             console.log('receiveChannel', message);
-       *             transvideoRef.value.handleReceivedMessage(message);
-       *           } catch (error) {
-       *             console.error('解析视频消息失败:', error);
-       *           }
-       *         };
-       *       }
-       */
     }
 
     // 发送渠道设置
@@ -208,49 +214,8 @@ const switchFunction = (tab) => {
           }
         };
       }
-      /**
-       * else if (tab === 'video' && transvideoRef.value) {
-        console.log('切换为video');
-
-        sendChannel.value.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            console.log('sendChannel', message);
-            transvideoRef.value.handleReceivedMessage(message);
-          } catch (error) {
-            console.error('解析视频消息失败:', error);
-          }
-        };
-      }
-       */
     }
   });
-};
-
-// 引用组件
-const transfileRef = ref(null);
-const transtextRef = ref(null);
-const transvideoRef = ref(null);
-const transscreenRef = ref(null);
-
-// 清空文件列表
-const clearFiles = () => {
-  if (transfileRef.value) {
-    transfileRef.value.clearFiles();
-  }
-};
-
-// 选择文件
-const selectFile = () => {
-  if (transfileRef.value) {
-    transfileRef.value.selectFile();
-  }
-};
-
-const handleChangeSdp = (offer) => {
-  console.log('handleChangeSdp', offer);
-
-  signaling.value.postMessage({ type: 'offer', sdp: offer.sdp });
 };
 
 async function createPeerConnection() {
@@ -378,19 +343,6 @@ function receiveChannelCallback(event) {
       }
     };
   }
-  /**
-   * else if (activeTab.value === 'video' && transvideoRef.value) {
-    receiveChannel.value.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        console.log('receiveChannel 执行', message);
-        transvideoRef.value.handleReceivedMessage(message);
-      } catch (error) {
-        console.error('解析消息失败:', error);
-      }
-    };
-  }
-   */
 }
 
 // 开始创建连接入口  发送方
@@ -415,20 +367,6 @@ const startFn = async () => {
       }
     };
   }
-  /**
-   * else if (activeTab.value === 'video' && transvideoRef.value) {
-    sendChannel.value.onmessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-        console.log('sendChannel', message);
-        transvideoRef.value.handleReceivedMessage(message);
-      } catch (error) {
-        console.error('解析消息失败:', error);
-      }
-    };
-  }
-   *
-   * */
 
   // 创建发送方的连接信息
   const offer = await pc.value.createOffer();
