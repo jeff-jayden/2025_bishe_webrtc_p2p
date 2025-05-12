@@ -5,50 +5,60 @@
     @dragenter.prevent
     @dragover.prevent
   >
-    <!-- 拖放区域 -->
-    <div class="drop-area" @click="selectFile">
-      <div class="drop-content">
-        <p>点击添加文件或将文件（夹）拖放到这里（单次可发10个文件）</p>
-      </div>
-    </div>
-    <div class="file-container">
-      <div class="has-send">已发送文件</div>
-      <div class="file-list" v-if="localFilesList.length">
-        <div
-          v-for="(file, index) in localFilesList"
-          :key="index"
-          class="file-item"
-        >
-          <div class="file-name">{{ file.name }}</div>
-          <div class="file-details">
-            <div class="size">{{ (file.size / 1024).toFixed(2) }} KB</div>
-            <el-progress
-              :percentage="currentTransfersInner[file.name]?.progress"
-              class="progress"
-            />
-            <div class="delete_btn" @click="handleDeleteFile(index)">
-              <el-tooltip content="sure delete???" placement="top"
-                ><close-one class="close" theme="outline" size="16"
-              /></el-tooltip>
+    <div class="file-area">
+      <div class="file-container">
+        <div class="has-send">已发送文件</div>
+        <div class="file-list" v-if="localFilesList.length">
+          <div
+            v-for="(file, index) in localFilesList"
+            :key="index"
+            class="file-item"
+          >
+            <div class="file-name">{{ file.name }}</div>
+            <div class="file-details">
+              <el-button
+                v-if="currentTransfersInner[file.name]?.status === 'completed'"
+                type="primary"
+                @click="handlePreview(file.name)"
+                >预览</el-button
+              >
+              <div class="size">
+                <span>{{ (file.size / 1024).toFixed(2) }} KB</span>
+              </div>
+              <el-progress
+                :percentage="currentTransfersInner[file.name]?.progress"
+                class="progress"
+              />
+              <div class="delete_btn" @click="handleDeleteFile(index)">
+                <el-tooltip content="sure delete???" placement="top"
+                  ><close-one class="close" theme="outline" size="16"
+                /></el-tooltip>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="has-receive">已收到文件</div>
+        <div class="file-list" v-if="receivedFileList.length">
+          <div
+            v-for="(file, index) in receivedFileList"
+            :key="index"
+            class="file-item"
+          >
+            <div class="file-name">
+              <a :href="URL.createObjectURL(file)" :download="file.name">{{
+                file.name
+              }}</a>
+            </div>
+            <div class="file-details">
+              <div class="size">{{ (file.size / 1024).toFixed(2) }} KB</div>
             </div>
           </div>
         </div>
       </div>
-      <div class="has-receive">已收到文件</div>
-      <div class="file-list" v-if="receivedFileList.length">
-        <div
-          v-for="(file, index) in receivedFileList"
-          :key="index"
-          class="file-item"
-        >
-          <div class="file-name">
-            <a :href="URL.createObjectURL(file)" :download="file.name">{{
-              file.name
-            }}</a>
-          </div>
-          <div class="file-details">
-            <div class="size">{{ (file.size / 1024).toFixed(2) }} KB</div>
-          </div>
+      <!-- 拖放区域 -->
+      <div class="drop-area" @click="selectFile">
+        <div class="drop-content">
+          <p>点击添加文件或将文件（夹）拖放到这里（单次可发10个文件）</p>
         </div>
       </div>
     </div>
@@ -69,15 +79,19 @@
 import { CloseOne } from '@icon-park/vue-next';
 import { ref, onMounted } from 'vue';
 import { encryptData, decryptData } from '@/utils/crypto';
+import { encode } from 'js-base64';
 
 // 获取URL对象，用于创建文件下载链接
 const URL = window.URL || window.webkitURL;
+const ALIST_DONMAIN = 'http://192.168.206.72:5244';
+const MINIO_DONMAIN = 'http://192.168.206.72:9000';
 
 const transferQueue = ref([]);
 const fileReaders = ref({});
 const localFilesList = ref([]);
 const maxParallelTransfers = 3; // 最大并行传输数量
 const currentTransfersInner = ref({});
+const alistToken = ref('');
 
 const props = defineProps({
   receivedFileList: Array,
@@ -88,6 +102,61 @@ const props = defineProps({
   receivedFileSizes: Object,
 });
 
+const getAlistToken = async () => {
+  var myHeaders = new Headers();
+  myHeaders.append('Content-Type', 'application/json');
+
+  var raw = JSON.stringify({
+    username: 'admin',
+    password: 'admin',
+  });
+
+  var requestOptions = {
+    method: 'POST',
+    headers: myHeaders,
+    body: raw,
+    redirect: 'follow',
+  };
+
+  fetch(`${ALIST_DONMAIN}/api/auth/login`, requestOptions)
+    .then((response) => response.text())
+    .then((result) => {
+      result = JSON.parse(result);
+      console.log(result);
+      alistToken.value = result;
+    })
+    .catch((error) => console.log('error', error));
+};
+
+const handleUpload2Alist = (fileInfo, data) => {
+  var myHeaders = new Headers();
+  myHeaders.append('Authorization', alistToken.value);
+  myHeaders.append('File-Path', `/root${encodeURIComponent(fileInfo.name)}`);
+  myHeaders.append('As-Task', 'true');
+  myHeaders.append('Content-Length', '');
+  myHeaders.append('Content-Type', 'application/octet-stream');
+
+  var requestOptions = {
+    method: 'PUT',
+    headers: myHeaders,
+    body: data,
+    redirect: 'follow',
+  };
+
+  fetch(`${ALIST_DONMAIN}/api/fs/put`, requestOptions)
+    .then((response) => response.text())
+    .then((result) => console.log(result))
+    .catch((error) => console.log('error', error));
+};
+
+const handlePreview = (fileName) => {
+  var url = `${MINIO_DONMAIN}/miniodemo/root/${fileName}`; //要预览文件的访问地址
+  window.open(
+    'http://127.0.0.1:8012/onlinePreview?url=' + encodeURIComponent(encode(url))
+  );
+};
+
+// 接收文件处理函数
 async function onReceiveChannelMessageCallback(event) {
   console.log('Received Message');
 
@@ -280,6 +349,7 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
     status: 'transferring',
     uploadedSize: uploadedSize,
   };
+
   currentTransfersInner.value[transferId] = info;
   props.currentTransfers[transferId] = info;
 
@@ -385,6 +455,11 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
     } else {
       // 传输完成
       console.log('传输完成');
+
+      // 传输完成，上传至alist
+      handleUpload2Alist(fileInfo, data);
+      currentTransfersInner.value[transferId].status = 'completed';
+
       setTimeout(() => {
         delete fileReaders.value[transferId];
         delete props.currentTransfers[transferId];
@@ -530,16 +605,18 @@ const selectFile = () => {
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
 
-      // 添加到本地文件列表
-      localFilesList.value.push({
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        file: file, // 保存文件对象本身，以便后续发送
-        date: new Date().toLocaleString(),
-        progress: 0, // 初始化进度为0
-        uploadedSize: 0, // 初始化已上传大小为0
-      });
+      // 如果已经上传，提示已上传
+      if (localFilesList.value.find((item) => {}))
+        // 添加到本地文件列表
+        localFilesList.value.push({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          file: file, // 保存文件对象本身，以便后续发送
+          date: new Date().toLocaleString(),
+          progress: 0, // 初始化进度为0
+          uploadedSize: 0, // 初始化已上传大小为0
+        });
     }
   };
 
@@ -549,6 +626,10 @@ const selectFile = () => {
 // 清空文件列表
 const clearFiles = () => {
   localFilesList.value = [];
+};
+
+const connectAlist = async () => {
+  await getAlistToken();
 };
 
 // 暴露方法给父组件
@@ -585,103 +666,110 @@ onMounted(() => {
   width: 100%;
   position: relative;
 
-  /* 拖放区域 */
-  .drop-area {
+  .file-area {
     display: flex;
-    justify-content: center;
     align-items: center;
-    height: 220px;
-    background-color: #fafafa;
-    border: 2px dashed #ddd;
-    border-radius: 8px;
-    margin: 20px;
-    text-align: center;
-    cursor: pointer;
-    transition: all 0.3s;
-  }
+    width: 100%;
 
-  .drop-area:hover,
-  .drop-area.drop-hover {
-    border-color: #2196f3;
-    background-color: rgba(33, 150, 243, 0.05);
-  }
+    /* 拖放区域 */
+    .drop-area {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 300px;
+      width: 50%;
+      background-color: #fafafa;
+      border: 2px dashed #ddd;
+      border-radius: 8px;
+      margin: 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
 
-  .drop-content {
-    color: #b0b0b0;
-  }
+    .drop-area:hover,
+    .drop-area.drop-hover {
+      border-color: #2196f3;
+      background-color: rgba(33, 150, 243, 0.05);
+    }
 
-  .file-container {
-    .file-list {
-      width: 97%;
-      height: 155px;
-      overflow: auto;
-      margin: 0 20px;
+    .drop-content {
+      color: #b0b0b0;
+    }
 
-      .has-receive {
-        margin-bottom: 10px;
-      }
+    .file-container {
+      width: 50%;
 
+      .has-receive,
       .has-send {
-        margin: 0 0 10px 0;
+        display: flex;
+        justify-content: center;
       }
 
-      .file-item {
-        display: flex;
-        flex: 1;
-        align-items: center;
-        justify-content: space-between;
-        padding: 5px 8px;
-        border: 1px solid #eee;
-        border-radius: 8px;
-        margin-bottom: 10px;
+      .file-list {
+        width: 97%;
+        height: 155px;
+        overflow: auto;
+        margin: 0 20px;
 
-        .file-name {
-          width: fit-content;
-          color: #4a4a4a;
-          font-size: 14px;
+        .file-item {
+          display: flex;
+          flex: 1;
+          align-items: center;
+          justify-content: space-between;
           padding: 5px 8px;
+          border: 1px solid #eee;
+          border-radius: 8px;
+          margin-bottom: 10px;
 
-          a {
-            text-decoration: none;
+          .file-name {
+            width: fit-content;
+            color: #4a4a4a;
+            font-size: 14px;
+            padding: 5px 8px;
 
-            &:hover {
-              cursor: pointer;
+            a {
+              text-decoration: none;
+
+              &:hover {
+                cursor: pointer;
+              }
             }
           }
-        }
 
-        .file-details {
-          color: #888;
-          font-size: 12px;
-          display: flex;
-          margin-right: 50px;
-
-          .progress {
-            width: 150px;
-            margin-left: 5px;
-          }
-
-          .size {
-            background-color: #fafafa;
-            border: 1px solid #d9d9d9;
-            padding: 0 7px;
-            line-height: 20px;
-            border-radius: 4px;
-          }
-
-          .delete_btn {
+          .file-details {
+            color: #888;
+            font-size: 12px;
             display: flex;
-            justify-content: center;
-            align-items: center;
-            padding-left: 8px;
-            .close {
+
+            .progress {
+              width: 150px;
+              margin-left: 5px;
+            }
+
+            .size {
+              background-color: #fafafa;
+              border: 1px solid #d9d9d9;
+              padding: 0 7px;
+              line-height: 20px;
+              border-radius: 4px;
+              display: flex;
+              align-items: center;
+            }
+
+            .delete_btn {
               display: flex;
               justify-content: center;
               align-items: center;
-              color: #696969;
-              &:hover {
-                color: red;
-                cursor: pointer;
+              .close {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                color: #696969;
+                &:hover {
+                  color: red;
+                  cursor: pointer;
+                }
               }
             }
           }

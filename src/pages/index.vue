@@ -65,6 +65,9 @@
           </div>
         </div>
         <div class="right-nav">
+          <el-button type="primary" class="nav-button" @click="handlePreview"
+            >预览</el-button
+          >
           <el-button type="primary" class="nav-button">下载所有</el-button>
           <el-button type="success" class="nav-button" @click="selectFile"
             >添加文件</el-button
@@ -120,7 +123,9 @@ import Transfile from '@/components/transfile.vue';
 import Transtext from '@/components/transtext.vue';
 import Transvideo from '@/components/transvideo.vue';
 import Transscreen from '@/components/transscreen.vue';
+import { encode } from 'js-base64';
 
+const MINIO_DONMAIN = 'http://192.168.206.72:9000';
 const receivedFileChunks = ref({});
 const receivedFileSizes = ref({});
 const receivedFileList = ref([]);
@@ -144,6 +149,14 @@ const transfileRef = ref(null);
 const transtextRef = ref(null);
 const transvideoRef = ref(null);
 const transscreenRef = ref(null);
+
+//预览文件功能
+const handlePreview = () => {
+  var url = `${MINIO_DONMAIN}/miniodemo/root/总体架构图.png`; //要预览文件的访问地址
+  window.open(
+    'http://127.0.0.1:8012/onlinePreview?url=' + encodeURIComponent(encode(url))
+  );
+};
 
 // 清空文件列表
 const clearFiles = () => {
@@ -379,10 +392,10 @@ const hangup = () => {
     pc.value.close();
     pc.value = null;
   }
-  if(activeTab.value === 'video' && transvideoRef.value) {
+  if (activeTab.value === 'video' && transvideoRef.value) {
     transvideoRef.value.endVideoCall();
   }
-  if(activeTab.value === 'screen' && transscreenRef.value) {
+  if (activeTab.value === 'screen' && transscreenRef.value) {
     transscreenRef.value.stopScreenShare();
   }
 };
