@@ -234,6 +234,39 @@ const switchFunction = (tab) => {
 async function createPeerConnection() {
   console.log('createPeerConnection-----');
   pc.value = new RTCPeerConnection(configuration.value);
+
+  // 设置数据分析
+  setInterval(() => {
+    pc.value
+      .getSenders()[0]
+      .getStats(null)
+      .then((stats) => {
+        console.log('states', stats);
+        let statsOutput = '';
+
+        stats.forEach((report) => {
+          statsOutput +=
+            `<h2>Report: ${report.type}</h2>\n<strong>ID:</strong> ${report.id}<br>\n` +
+            `<strong>Timestamp:</strong> ${report.timestamp}<br>\n`;
+
+          // Now the statistics for this report; we intentionally drop the ones we
+          // sorted to the top above
+
+          Object.keys(report).forEach((statName) => {
+            if (
+              statName !== 'id' &&
+              statName !== 'timestamp' &&
+              statName !== 'type'
+            ) {
+              statsOutput += `<strong>${statName}:</strong> ${report[statName]}<br>\n`;
+            }
+          });
+        });
+
+        transfileRef.value.statsbox.innerHTML = statsOutput;
+      });
+  }, 5000);
+
   pc.value.onicecandidate = (e) => {
     const message = {
       type: 'candidate',

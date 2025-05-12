@@ -7,50 +7,56 @@
   >
     <div class="file-area">
       <div class="file-container">
-        <div class="has-send">已发送文件</div>
-        <div class="file-list" v-if="localFilesList.length">
-          <div
-            v-for="(file, index) in localFilesList"
-            :key="index"
-            class="file-item"
-          >
-            <div class="file-name">{{ file.name }}</div>
-            <div class="file-details">
-              <el-button
-                v-if="currentTransfersInner[file.name]?.status === 'completed'"
-                type="primary"
-                @click="handlePreview(file.name)"
-                >预览</el-button
-              >
-              <div class="size">
-                <span>{{ (file.size / 1024).toFixed(2) }} KB</span>
-              </div>
-              <el-progress
-                :percentage="currentTransfersInner[file.name]?.progress"
-                class="progress"
-              />
-              <div class="delete_btn" @click="handleDeleteFile(index)">
-                <el-tooltip content="sure delete???" placement="top"
-                  ><close-one class="close" theme="outline" size="16"
-                /></el-tooltip>
+        <div class="has-container">
+          <div class="has-send">已发送文件</div>
+          <div class="file-list">
+            <div
+              v-for="(file, index) in localFilesList"
+              :key="index"
+              class="file-item"
+            >
+              <div class="file-name">{{ file.name }}</div>
+              <div class="file-details">
+                <el-button
+                  v-if="
+                    currentTransfersInner[file.name]?.status === 'completed'
+                  "
+                  type="primary"
+                  @click="handlePreview(file.name)"
+                  >预览</el-button
+                >
+                <div class="size">
+                  <span>{{ (file.size / 1024).toFixed(2) }} KB</span>
+                </div>
+                <el-progress
+                  :percentage="currentTransfersInner[file.name]?.progress"
+                  class="progress"
+                />
+                <div class="delete_btn" @click="handleDeleteFile(index)">
+                  <el-tooltip content="sure delete???" placement="top"
+                    ><close-one class="close" theme="outline" size="16"
+                  /></el-tooltip>
+                </div>
               </div>
             </div>
           </div>
         </div>
-        <div class="has-receive">已收到文件</div>
-        <div class="file-list" v-if="receivedFileList.length">
-          <div
-            v-for="(file, index) in receivedFileList"
-            :key="index"
-            class="file-item"
-          >
-            <div class="file-name">
-              <a :href="URL.createObjectURL(file)" :download="file.name">{{
-                file.name
-              }}</a>
-            </div>
-            <div class="file-details">
-              <div class="size">{{ (file.size / 1024).toFixed(2) }} KB</div>
+        <div class="receive-container">
+          <div class="has-receive">已收到文件</div>
+          <div class="file-list">
+            <div
+              v-for="(file, index) in receivedFileList"
+              :key="index"
+              class="file-item"
+            >
+              <div class="file-name">
+                <a :href="URL.createObjectURL(file)" :download="file.name">{{
+                  file.name
+                }}</a>
+              </div>
+              <div class="file-details">
+                <div class="size">{{ (file.size / 1024).toFixed(2) }} KB</div>
+              </div>
             </div>
           </div>
         </div>
@@ -71,12 +77,24 @@
       >
         发送
       </el-button>
+      <div class="con-status">
+        <div class="connected">
+          <Dot
+            theme="outline"
+            size="16"
+            fill="#08b18f"
+            :strokeWidth="3"
+            class="dot"
+          /><span>connected</span>
+        </div>
+      </div>
+      <div class=".stats-box" ref="statsbox"></div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { CloseOne } from '@icon-park/vue-next';
+import { CloseOne, Dot } from '@icon-park/vue-next';
 import { ref, onMounted } from 'vue';
 import { encryptData, decryptData } from '@/utils/crypto';
 import { encode } from 'js-base64';
@@ -92,6 +110,7 @@ const localFilesList = ref([]);
 const maxParallelTransfers = 3; // 最大并行传输数量
 const currentTransfersInner = ref({});
 const alistToken = ref('');
+const statsbox = ref();
 
 const props = defineProps({
   receivedFileList: Array,
@@ -641,6 +660,7 @@ defineExpose({
   onSendChannelMessageCallback,
   onSendChannelStateChange,
   onReceiveChannelStateChange,
+  statsbox,
 });
 
 // 监听通道状态变化
@@ -783,9 +803,22 @@ onMounted(() => {
     margin-top: 10px;
     position: absolute;
     bottom: 100px;
+    display: flex;
 
     .btn {
       margin-left: 20px;
+    }
+
+    .con-status {
+      margin-left: 5px;
+
+      .connected {
+        display: flex;
+
+        .dot {
+          margin-top: 4px;
+        }
+      }
     }
   }
 }
