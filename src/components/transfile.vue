@@ -78,7 +78,7 @@
         发送
       </el-button>
       <div class="con-status">
-        <div class="connected">
+        <div class="connected" v-if="con_status">
           <Dot
             theme="outline"
             size="16"
@@ -86,6 +86,15 @@
             :strokeWidth="3"
             class="dot"
           /><span>connected</span>
+        </div>
+        <div class="disconnected" v-else>
+          <dot
+            theme="outline"
+            size="16"
+            fill="#f00b25"
+            :strokeWidth="3"
+            class="dot"
+          /><span>disconnected</span>
         </div>
       </div>
       <div class=".stats-box" ref="statsbox"></div>
@@ -96,7 +105,6 @@
 <script setup>
 import { CloseOne, Dot } from '@icon-park/vue-next';
 import { ref, onMounted } from 'vue';
-import { encryptData, decryptData } from '@/utils/crypto';
 import { encode } from 'js-base64';
 
 // 获取URL对象，用于创建文件下载链接
@@ -104,6 +112,7 @@ const URL = window.URL || window.webkitURL;
 const ALIST_DONMAIN = 'http://192.168.206.72:5244';
 const MINIO_DONMAIN = 'http://192.168.206.72:9000';
 
+const con_status = ref(false);
 const transferQueue = ref([]);
 const fileReaders = ref({});
 const localFilesList = ref([]);
@@ -295,7 +304,6 @@ function onSendChannelStateChange() {
   // 当通道打开时，设置缓冲区阈值和事件处理
   if (readyState === 'open') {
     props.sendChannel.bufferedAmountLowThreshold = 65536; // 64KB
-
     // 监控缓冲区状态
     const monitorBufferedAmount = () => {
       if (props.sendChannel && props.sendChannel.readyState === 'open') {
@@ -309,9 +317,11 @@ function onSendChannelStateChange() {
         setTimeout(monitorBufferedAmount, 2000);
       }
     };
-
     monitorBufferedAmount();
+    return;
   }
+
+  con_status.value = false;
 }
 
 // 接收通道状态变化处理函数
@@ -324,7 +334,6 @@ function onReceiveChannelStateChange() {
   // 当通道打开时，设置缓冲区阈值和事件处理
   if (readyState === 'open') {
     props.receiveChannel.bufferedAmountLowThreshold = 65536; // 64KB
-
     // 监控缓冲区状态
     const monitorBufferedAmount = () => {
       if (props.receiveChannel && props.receiveChannel.readyState === 'open') {
@@ -338,9 +347,10 @@ function onReceiveChannelStateChange() {
         setTimeout(monitorBufferedAmount, 2000);
       }
     };
-
     monitorBufferedAmount();
+    return;
   }
+  con_status.value = false;
 }
 
 const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
@@ -526,14 +536,14 @@ function sendData() {
     const data = item.file;
     const uploadedSize = item.uploadedSize || 0; // 获取已上传大小
 
-    console.log(
-      `开始发送文件: ${[
-        data.name,
-        data.size,
-        data.type,
-        data.lastModified,
-      ].join(' ')}, 已上传: ${uploadedSize} 字节`
-    );
+    // console.log(
+    //   `开始发送文件: ${[
+    //     data.name,
+    //     data.size,
+    //     data.type,
+    //     data.lastModified,
+    //   ].join(' ')}, 已上传: ${uploadedSize} 字节`
+    // );
 
     const fileInfo = {
       name: data.name,
@@ -661,6 +671,7 @@ defineExpose({
   onSendChannelStateChange,
   onReceiveChannelStateChange,
   statsbox,
+  con_status,
 });
 
 // 监听通道状态变化
@@ -775,6 +786,7 @@ onMounted(() => {
               border-radius: 4px;
               display: flex;
               align-items: center;
+              margin-left: 5px;
             }
 
             .delete_btn {
@@ -812,7 +824,8 @@ onMounted(() => {
     .con-status {
       margin-left: 5px;
 
-      .connected {
+      .connected,
+      .disconnected {
         display: flex;
 
         .dot {

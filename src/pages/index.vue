@@ -124,6 +124,7 @@ import Transtext from '@/components/transtext.vue';
 import Transvideo from '@/components/transvideo.vue';
 import Transscreen from '@/components/transscreen.vue';
 import { encode } from 'js-base64';
+import { ElMessageBox, ElMessage } from 'element-plus';
 
 const MINIO_DONMAIN = 'http://192.168.206.72:9000';
 const receivedFileChunks = ref({});
@@ -231,41 +232,51 @@ const switchFunction = (tab) => {
   });
 };
 
+const hangup = () => {
+  if (pc.value) {
+    pc.value.close();
+    pc.value = null;
+  }
+  if (activeTab.value === 'video' && transvideoRef.value) {
+    transvideoRef.value.endVideoCall();
+  }
+  if (activeTab.value === 'screen' && transscreenRef.value) {
+    transscreenRef.value.stopScreenShare();
+  }
+};
+
 async function createPeerConnection() {
   console.log('createPeerConnection-----');
   pc.value = new RTCPeerConnection(configuration.value);
 
   // 设置数据分析
-  setInterval(() => {
-    pc.value
-      .getSenders()[0]
-      .getStats(null)
-      .then((stats) => {
-        console.log('states', stats);
-        let statsOutput = '';
+  // setInterval(() => {
+  //   pc.value.getStats(null).then((stats) => {
+  //     console.log('states', stats);
+  //     let statsOutput = '';
 
-        stats.forEach((report) => {
-          statsOutput +=
-            `<h2>Report: ${report.type}</h2>\n<strong>ID:</strong> ${report.id}<br>\n` +
-            `<strong>Timestamp:</strong> ${report.timestamp}<br>\n`;
+  //     stats.forEach((report) => {
+  //       statsOutput +=
+  //         `<h2>Report: ${report.type}</h2>\n<strong>ID:</strong> ${report.id}<br>\n` +
+  //         `<strong>Timestamp:</strong> ${report.timestamp}<br>\n`;
 
-          // Now the statistics for this report; we intentionally drop the ones we
-          // sorted to the top above
+  //       // Now the statistics for this report; we intentionally drop the ones we
+  //       // sorted to the top above
 
-          Object.keys(report).forEach((statName) => {
-            if (
-              statName !== 'id' &&
-              statName !== 'timestamp' &&
-              statName !== 'type'
-            ) {
-              statsOutput += `<strong>${statName}:</strong> ${report[statName]}<br>\n`;
-            }
-          });
-        });
+  //       Object.keys(report).forEach((statName) => {
+  //         if (
+  //           statName !== 'id' &&
+  //           statName !== 'timestamp' &&
+  //           statName !== 'type'
+  //         ) {
+  //           statsOutput += `<strong>${statName}:</strong> ${report[statName]}<br>\n`;
+  //         }
+  //       });
+  //     });
 
-        transfileRef.value.statsbox.innerHTML = statsOutput;
-      });
-  }, 5000);
+  //     transfileRef.value.statsbox.innerHTML = statsOutput;
+  //   });
+  // }, 5000);
 
   pc.value.onicecandidate = (e) => {
     const message = {
@@ -330,6 +341,12 @@ async function handleAnswer(answer) {
     return;
   }
   await pc.value.setRemoteDescription(answer);
+
+  // 成功设置对方的连接信息
+  // 改变连接状态
+  transfileRef.value.con_status = true;
+  // 同时发送信号给对方改变状态
+  signaling.value.postMessage({ type: 'connction', status: 'connected' });
 }
 
 async function handleCandidate(candidate) {
@@ -420,17 +437,29 @@ const startFn = async () => {
   await pc.value.setLocalDescription(offer);
 };
 
-const hangup = () => {
-  if (pc.value) {
-    pc.value.close();
-    pc.value = null;
-  }
-  if (activeTab.value === 'video' && transvideoRef.value) {
-    transvideoRef.value.endVideoCall();
-  }
-  if (activeTab.value === 'screen' && transscreenRef.value) {
-    transscreenRef.value.stopScreenShare();
-  }
+const sureConnect = (data) => {
+  ElMessageBox.confirm(
+    `Would you like to accept a connection from ${data.name}?`,
+    'Warning',
+    {
+      confirmButtonText: 'OK',
+      cancelButtonText: 'Cancel',
+      type: 'warning',
+    }
+  )
+    .then(() => {
+      ElMessage({
+        type: 'success',
+        message: 'you agreed to connect',
+      });
+      startFn();
+    })
+    .catch(() => {
+      ElMessage({
+        type: 'info',
+        message: 'connect canceled',
+      });
+    });
 };
 
 onMounted(() => {
@@ -455,14 +484,20 @@ onMounted(() => {
       case 'candidate':
         handleCandidate(e.data);
         break;
+      case 'connction':
+        transfileRef.value.con_status = e.data.status === 'connected';
+        break;
       case 'ready':
-        // A second tab joined. This tab will enable the start button unless in a call already.
         if (pc.value) {
-          console.log(pc.value);
+          // 说明己方即将断开，此时发送消息给对面更新状态
           console.log('already in call, ignoring');
+          signaling.value.postMessage({
+            type: 'connction',
+            status: 'disconnected',
+          });
           return;
         }
-        startFn();
+        sureConnect(e.data);
         break;
       case 'bye':
         if (pc) {
@@ -475,7 +510,8 @@ onMounted(() => {
     }
   };
   if (activeTab.value !== 'video') {
-    signaling.value.postMessage({ type: 'ready' });
+    const name = Date.now().toString().slice(10);
+    signaling.value.postMessage({ type: 'ready', name });
   }
 });
 </script>
