@@ -61,14 +61,6 @@
           </div>
         </div>
       </div>
-      <!-- 拖放区域 -->
-      <div class="drop-area" @click="selectFile">
-        <div class="drop-content">
-          <p>点击添加文件或将文件（夹）拖放到这里（单次可发10个文件）</p>
-        </div>
-      </div>
-    </div>
-    <div class="bottom-area">
       <div class="bottom">
         <el-button
           type="primary"
@@ -100,14 +92,26 @@
         </div>
         <div class="stats-box" ref="statsbox"></div>
       </div>
-      <div class="box">
-        <canvas
-          class="bitrateCanvas"
-          id="bitrateCanvas"
-          ref="bitrateCanvas"
-        ></canvas>
-        <div v-if="con_status">
-          maxSpeed: {{ (maxTransferData / 1000 / 1000).toFixed(2) }} MB/s
+    </div>
+
+    <!-- 右边区域 -->
+    <div class="right_area">
+      <!-- 拖放区域 -->
+      <div class="drop-area" @click="selectFile">
+        <div class="drop-content">
+          <p>点击添加文件或将文件（夹）拖放到这里（单次可发10个文件）</p>
+        </div>
+      </div>
+      <div class="bottom-area">
+        <div class="box">
+          <canvas
+            class="bitrateCanvas"
+            id="bitrateCanvas"
+            ref="bitrateCanvas"
+          ></canvas>
+          <div v-if="con_status">
+            maxSpeed: {{ (maxTransferData / 1000 / 1000).toFixed(2) }} MB/s
+          </div>
         </div>
       </div>
     </div>
@@ -118,6 +122,7 @@
 import { CloseOne, Dot } from '@icon-park/vue-next';
 import { ref, onMounted } from 'vue';
 import { encode } from 'js-base64';
+import { ElMessage } from 'element-plus';
 
 // 获取URL对象，用于创建文件下载链接
 const URL = window.URL || window.webkitURL;
@@ -336,6 +341,11 @@ function onSendChannelStateChange() {
   }
 
   con_status.value = false;
+
+  if (!con_status.value) {
+    ElMessage.error('对方连接断开，请重试！');
+    stopSendData();
+  }
 }
 
 // 接收通道状态变化处理函数
@@ -364,8 +374,19 @@ function onReceiveChannelStateChange() {
     monitorBufferedAmount();
     return;
   }
+
   con_status.value = false;
+
+  if (!con_status.value) {
+    ElMessage.error('对方连接断开，请重试！');
+    stopSendData();
+  }
 }
+
+const stopSendData = () => {
+  sendQueue = [];
+  transferQueue.value = [];
+};
 
 const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
   // 生成唯一的传输ID
@@ -412,7 +433,7 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
   let sendingInProgress = false;
 
   // 创建发送队列
-  const sendQueue = [];
+  let sendQueue = [];
 
   // 处理发送队列的函数
   const processSendQueue = () => {
@@ -438,6 +459,7 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
     } catch (error) {
       console.error('发送数据出错:', error);
       // 出错时重新加入队列前端
+      if (!con_status.value) return;
       sendQueue.unshift(item);
       sendingInProgress = false;
       // 稍后重试
@@ -711,40 +733,14 @@ onMounted(() => {
   height: 100%;
   width: 100%;
   position: relative;
+  display: flex;
+  justify-content: space-between;
 
   .file-area {
-    display: flex;
-    align-items: center;
-    width: 100%;
-
-    /* 拖放区域 */
-    .drop-area {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 300px;
-      width: 50%;
-      background-color: #fafafa;
-      border: 2px dashed #ddd;
-      border-radius: 8px;
-      margin: 20px;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.3s;
-    }
-
-    .drop-area:hover,
-    .drop-area.drop-hover {
-      border-color: #2196f3;
-      background-color: rgba(33, 150, 243, 0.05);
-    }
-
-    .drop-content {
-      color: #b0b0b0;
-    }
+    width: 50%;
 
     .file-container {
-      width: 50%;
+      width: 100%;
 
       .has-receive,
       .has-send {
@@ -754,9 +750,13 @@ onMounted(() => {
 
       .file-list {
         width: 97%;
-        height: 155px;
+        height: 300px;
         overflow: auto;
         margin: 0 20px;
+
+        border: 1px #fefe solid;
+        padding: 5px;
+        background-color: #f5f5f5;
 
         .file-item {
           display: flex;
@@ -767,12 +767,17 @@ onMounted(() => {
           border: 1px solid #eee;
           border-radius: 8px;
           margin-bottom: 10px;
+          background-color: #fff;
 
           .file-name {
             width: fit-content;
             color: #4a4a4a;
             font-size: 14px;
             padding: 5px 8px;
+            width: 300px;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            overflow: hidden;
 
             a {
               text-decoration: none;
@@ -825,6 +830,35 @@ onMounted(() => {
     }
   }
 
+  .right_area {
+    width: 50%;
+  }
+
+  .drop-area:hover,
+  .drop-area.drop-hover {
+    border-color: #2196f3;
+    background-color: rgba(33, 150, 243, 0.05);
+  }
+
+  .drop-content {
+    color: #b0b0b0;
+  }
+
+  /* 拖放区域 */
+  .drop-area {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 300px;
+    background-color: #fafafa;
+    border: 2px dashed #ddd;
+    border-radius: 8px;
+    margin: 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+  }
+
   .bottom-area {
     height: 50%;
     width: 100%;
@@ -833,34 +867,35 @@ onMounted(() => {
     position: relative;
 
     .box {
+      margin: 20px 50px 50px 85px;
+
       .bitrateCanvas {
         width: 500px;
         height: 300px;
-        margin: 20px 100px 20px 20px;
       }
     }
+  }
 
-    .bottom {
-      height: 70px;
-      margin-top: 10px;
-      display: flex;
-      position: relative;
-      bottom: -350px;
+  .bottom {
+    height: 70px;
+    margin-top: 10px;
+    display: flex;
+    position: relative;
+    bottom: -60px;
 
-      .btn {
-        margin-left: 20px;
-      }
+    .btn {
+      margin-left: 20px;
+    }
 
-      .con-status {
-        margin-left: 5px;
+    .con-status {
+      margin-left: 5px;
 
-        .connected,
-        .disconnected {
-          display: flex;
+      .connected,
+      .disconnected {
+        display: flex;
 
-          .dot {
-            margin-top: 4px;
-          }
+        .dot {
+          margin-top: 4px;
         }
       }
     }
