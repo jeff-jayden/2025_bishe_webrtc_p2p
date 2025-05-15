@@ -26,7 +26,7 @@
                   >预览</el-button
                 >
                 <div class="size">
-                  <span>{{ (file.size / 1024).toFixed(2) }} KB</span>
+                  <span>{{ (file.size / 1000 / 1000).toFixed(2) }} MB</span>
                 </div>
                 <el-progress
                   :percentage="currentTransfersInner[file.name]?.progress"
@@ -68,36 +68,48 @@
         </div>
       </div>
     </div>
-    <div class="bottom">
-      <el-button
-        type="primary"
-        class="btn"
-        @click="sendData"
-        :disabled="localFilesList.length === 0"
-      >
-        发送
-      </el-button>
-      <div class="con-status">
-        <div class="connected" v-if="con_status">
-          <Dot
-            theme="outline"
-            size="16"
-            fill="#08b18f"
-            :strokeWidth="3"
-            class="dot"
-          /><span>connected</span>
+    <div class="bottom-area">
+      <div class="bottom">
+        <el-button
+          type="primary"
+          class="btn"
+          @click="sendData"
+          :disabled="localFilesList.length === 0"
+        >
+          发送
+        </el-button>
+        <div class="con-status">
+          <div class="connected" v-if="con_status">
+            <Dot
+              theme="outline"
+              size="16"
+              fill="#08b18f"
+              :strokeWidth="3"
+              class="dot"
+            /><span>connected</span>
+          </div>
+          <div class="disconnected" v-else>
+            <dot
+              theme="outline"
+              size="16"
+              fill="#f00b25"
+              :strokeWidth="3"
+              class="dot"
+            /><span>disconnected</span>
+          </div>
         </div>
-        <div class="disconnected" v-else>
-          <dot
-            theme="outline"
-            size="16"
-            fill="#f00b25"
-            :strokeWidth="3"
-            class="dot"
-          /><span>disconnected</span>
+        <div class="stats-box" ref="statsbox"></div>
+      </div>
+      <div class="box">
+        <canvas
+          class="bitrateCanvas"
+          id="bitrateCanvas"
+          ref="bitrateCanvas"
+        ></canvas>
+        <div v-if="con_status">
+          maxSpeed: {{ (maxTransferData / 1000 / 1000).toFixed(2) }} MB/s
         </div>
       </div>
-      <div class=".stats-box" ref="statsbox"></div>
     </div>
   </div>
 </template>
@@ -120,6 +132,7 @@ const maxParallelTransfers = 3; // 最大并行传输数量
 const currentTransfersInner = ref({});
 const alistToken = ref('');
 const statsbox = ref();
+const bitrateCanvas = ref();
 
 const props = defineProps({
   receivedFileList: Array,
@@ -128,6 +141,7 @@ const props = defineProps({
   currentTransfers: Object,
   receivedFileChunks: Object,
   receivedFileSizes: Object,
+  maxTransferData: Number,
 });
 
 const getAlistToken = async () => {
@@ -672,6 +686,7 @@ defineExpose({
   onReceiveChannelStateChange,
   statsbox,
   con_status,
+  bitrateCanvas,
 });
 
 // 监听通道状态变化
@@ -810,26 +825,42 @@ onMounted(() => {
     }
   }
 
-  .bottom {
-    height: 70px;
-    margin-top: 10px;
-    position: absolute;
-    bottom: 100px;
+  .bottom-area {
+    height: 50%;
+    width: 100%;
     display: flex;
+    justify-content: space-between;
+    position: relative;
 
-    .btn {
-      margin-left: 20px;
+    .box {
+      .bitrateCanvas {
+        width: 500px;
+        height: 300px;
+        margin: 20px 100px 20px 20px;
+      }
     }
 
-    .con-status {
-      margin-left: 5px;
+    .bottom {
+      height: 70px;
+      margin-top: 10px;
+      display: flex;
+      position: relative;
+      bottom: -350px;
 
-      .connected,
-      .disconnected {
-        display: flex;
+      .btn {
+        margin-left: 20px;
+      }
 
-        .dot {
-          margin-top: 4px;
+      .con-status {
+        margin-left: 5px;
+
+        .connected,
+        .disconnected {
+          display: flex;
+
+          .dot {
+            margin-top: 4px;
+          }
         }
       }
     }

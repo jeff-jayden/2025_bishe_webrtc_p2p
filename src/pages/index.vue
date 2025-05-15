@@ -89,6 +89,7 @@
         :receivedFileChunks="receivedFileChunks"
         :receivedFileSizes="receivedFileSizes"
         ref="transfileRef"
+        :maxTransferData="maxTransferData"
       />
       <Transtext
         v-if="activeTab === 'text'"
@@ -136,6 +137,8 @@ const signaling = ref();
 const sendChannel = ref();
 const receiveChannel = ref();
 const currentTransfers = ref({});
+const lastResult = ref();
+const maxTransferData = ref(0);
 
 // 配置STUN服务器，帮助NAT穿透
 const configuration = ref({
@@ -249,34 +252,68 @@ async function createPeerConnection() {
   console.log('createPeerConnection-----');
   pc.value = new RTCPeerConnection(configuration.value);
 
-  // 设置数据分析
-  // setInterval(() => {
-  //   pc.value.getStats(null).then((stats) => {
-  //     console.log('states', stats);
-  //     let statsOutput = '';
+  // 创建图
+  const bitrateSeries = new TimelineDataSeries();
+  const bitrateGraph = new TimelineGraphView('bitrateGraph', 'bitrateCanvas');
+  bitrateGraph.updateEndDate();
 
-  //     stats.forEach((report) => {
-  //       statsOutput +=
-  //         `<h2>Report: ${report.type}</h2>\n<strong>ID:</strong> ${report.id}<br>\n` +
-  //         `<strong>Timestamp:</strong> ${report.timestamp}<br>\n`;
+  // 设置数据分析;
+  setInterval(() => {
+    pc.value.getStats().then((stats) => {
+      console.log('states', stats);
+      let statsOutput = '';
 
-  //       // Now the statistics for this report; we intentionally drop the ones we
-  //       // sorted to the top above
+      stats.forEach((report) => {
+        if (report.type === 'data-channel' || report.type === 'transport') {
+          const now = report.timestamp;
+          const bytes = report.bytesSent;
 
-  //       Object.keys(report).forEach((statName) => {
-  //         if (
-  //           statName !== 'id' &&
-  //           statName !== 'timestamp' &&
-  //           statName !== 'type'
-  //         ) {
-  //           statsOutput += `<strong>${statName}:</strong> ${report[statName]}<br>\n`;
-  //         }
-  //       });
-  //     });
+          const packets = report.packetsSent;
+          if (lastResult.value && lastResult.value.has(report.id)) {
+            // calculate bitrate
+            const bitrate =
+              (8 * (bytes - lastResult.value.get(report.id).bytesSent)) /
+              (now - lastResult.value.get(report.id).timestamp);
 
-  //     transfileRef.value.statsbox.innerHTML = statsOutput;
-  //   });
-  // }, 5000);
+            console.log('bitrate', bitrate);
+            maxTransferData.value = Math.max(maxTransferData.value, bitrate);
+            // append to chart
+            bitrateSeries.addPoint(now, bitrate);
+            bitrateGraph.setDataSeries([bitrateSeries]);
+            bitrateGraph.updateEndDate();
+
+            // calculate number of packets and append to chart
+            // packetSeries.addPoint(
+            //   now,
+            //   packets - lastResult.get(report.id).packetsSent
+            // );
+            // packetGraph.setDataSeries([packetSeries]);
+            // packetGraph.updateEndDate();
+          }
+
+          // statsOutput +=
+          //   `<h2>Report: ${report.type}</h2>\n<strong>ID:</strong> ${report.id}<br>\n` +
+          //   `<strong>Timestamp:</strong> ${report.timestamp}<br>\n`;
+
+          // // Now the statistics for this report; we intentionally drop the ones we
+          // // sorted to the top above
+
+          // Object.keys(report).forEach((statName) => {
+          //   if (
+          //     statName !== 'id' &&
+          //     statName !== 'timestamp' &&
+          //     statName !== 'type'
+          //   ) {
+          //     statsOutput += `<strong>${statName}:</strong> ${report[statName]}<br>\n`;
+          //   }
+          // });
+        }
+      });
+
+      lastResult.value = stats;
+      transfileRef.value.statsbox.innerHTML = statsOutput;
+    });
+  }, 1000);
 
   pc.value.onicecandidate = (e) => {
     const message = {
@@ -545,7 +582,7 @@ onMounted(() => {
 
   .content {
     width: 80%;
-    height: 80%;
+    height: 90%;
     margin: 0 auto;
     background-color: #fff;
 
