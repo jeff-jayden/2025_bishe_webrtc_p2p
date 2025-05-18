@@ -18,9 +18,8 @@
               <div class="file-name">{{ file.name }}</div>
               <div class="file-details">
                 <el-button
-                  v-if="
-                    currentTransfersInner[file.name]?.status === 'completed'
-                  "
+                  class="btn"
+                  v-if="haveTransedFile[file.name]?.status === 'completed'"
                   type="primary"
                   @click="handlePreview(file.name)"
                   >预览</el-button
@@ -29,13 +28,20 @@
                   <span>{{ (file.size / 1000 / 1000).toFixed(2) }} MB</span>
                 </div>
                 <el-progress
-                  :percentage="currentTransfersInner[file.name]?.progress"
+                  :percentage="haveTransedFile[file.name]?.progress"
                   class="progress"
                 />
-                <div class="delete_btn" @click="handleDeleteFile(index)">
+                <div
+                  v-if="haveTransedFile[file.name]?.status !== 'completed'"
+                  class="delete_btn"
+                  @click="handleDeleteFile(index)"
+                >
                   <el-tooltip content="sure delete???" placement="top"
                     ><close-one class="close" theme="outline" size="16"
                   /></el-tooltip>
+                </div>
+                <div v-else class="has_completed">
+                  <span class="txt">已发送</span>
                 </div>
               </div>
             </div>
@@ -50,12 +56,36 @@
               class="file-item"
             >
               <div class="file-name">
-                <a :href="URL.createObjectURL(file)" :download="file.name">{{
-                  file.name
-                }}</a>
+                {{ file.name }}
               </div>
               <div class="file-details">
-                <div class="size">{{ (file.size / 1024).toFixed(2) }} KB</div>
+                <el-button
+                  class="btn"
+                  v-if="haveRecievedFile[file.name]?.status === 'completed'"
+                  type="primary"
+                  @click="handlePreview(file.name)"
+                  >预览</el-button
+                >
+                <el-progress
+                  :percentage="haveRecievedFile[file.name]?.progress"
+                  class="progress"
+                />
+                <div class="size">
+                  {{ (file.fileInfo.size / 1000 / 1000).toFixed(2) }} KB
+                </div>
+                <div class="link_area" v-if="file.receivedFile">
+                  <a
+                    :href="URL.createObjectURL(file.receivedFile)"
+                    :download="file.name"
+                  >
+                    <download
+                      theme="outline"
+                      size="16"
+                      :strokeWidth="3"
+                      class="link"
+                    />
+                  </a>
+                </div>
               </div>
             </div>
           </div>
@@ -119,22 +149,24 @@
 </template>
 
 <script setup>
-import { CloseOne, Dot } from '@icon-park/vue-next';
+import { CloseOne, Dot, Download } from '@icon-park/vue-next';
 import { ref, onMounted } from 'vue';
 import { encode } from 'js-base64';
 import { ElMessage } from 'element-plus';
 
 // 获取URL对象，用于创建文件下载链接
 const URL = window.URL || window.webkitURL;
-const ALIST_DONMAIN = 'http://192.168.206.72:5244';
-const MINIO_DONMAIN = 'http://192.168.206.72:9000';
+const ALIST_DONMAIN = 'http://192.168.1.10:5244';
+const MINIO_DONMAIN = 'http://192.168.1.10:9000';
 
 const con_status = ref(false);
+// 存放的是单独的要发送的完整文件
 const transferQueue = ref([]);
 const fileReaders = ref({});
 const localFilesList = ref([]);
 const maxParallelTransfers = 3; // 最大并行传输数量
-const currentTransfersInner = ref({});
+const haveTransedFile = ref({});
+const haveRecievedFile = ref({});
 const alistToken = ref('');
 const statsbox = ref();
 const bitrateCanvas = ref();
@@ -178,15 +210,17 @@ const getAlistToken = async () => {
 const handleUpload2Alist = (fileInfo, data) => {
   var myHeaders = new Headers();
   myHeaders.append('Authorization', alistToken.value);
-  myHeaders.append('File-Path', `/root${encodeURIComponent(fileInfo.name)}`);
+  myHeaders.append('File-Path', `/root/${encodeURIComponent(fileInfo.name)}`);
   myHeaders.append('As-Task', 'true');
   myHeaders.append('Content-Length', '');
   myHeaders.append('Content-Type', 'application/octet-stream');
 
+  const file = new File([data], fileInfo.name, { type: fileInfo.type });
+
   var requestOptions = {
     method: 'PUT',
     headers: myHeaders,
-    body: data,
+    body: file,
     redirect: 'follow',
   };
 
@@ -203,6 +237,9 @@ const handlePreview = (fileName) => {
   );
 };
 
+// 用于存放当前分块的信息
+const message = ref();
+
 // 接收文件处理函数
 async function onReceiveChannelMessageCallback(event) {
   console.log('Received Message');
@@ -211,98 +248,89 @@ async function onReceiveChannelMessageCallback(event) {
 
   if (typeof data === 'string') {
     try {
-      const message = JSON.parse(data);
-      console.log('message', message);
+      message.value = JSON.parse(data);
 
-      if (message.type === 'file-info') {
-        // 新文件传输开始，初始化接收状态
-        const transferId = message.transferId;
-        props.receivedFileChunks[transferId] = [];
-        // 从文件信息中获取已上传大小作为接收的起始大小
-        props.receivedFileSizes[transferId] = message.uploadedSize || 0;
-
-        // 保存文件信息
-        props.currentTransfers[transferId] = {
-          id: transferId,
-          fileInfo: message.data,
-          progress: Math.floor(
-            (props.receivedFileSizes[transferId] / message.data.size) * 100
-          ),
+      // 这是一个数据块的元信息，下一个消息将是实际数据
+      const { transferId, offset, size, fileInfo } = message.value;
+      const { name } = fileInfo;
+      if (!haveRecievedFile.value[transferId]) {
+        // 保存已收到文件信息
+        const receiveFileInfo = {
+          currentChunkOffset: offset || 0,
+          currentChunkSize: size,
           status: 'receiving',
-          uploadedSize: message.uploadedSize || 0, // 保存已上传大小
+          fileInfo,
+          name,
+          progress: 0,
         };
-      } else if (message.type === 'chunk-info') {
-        // 这是一个数据块的元信息，下一个消息将是实际数据
-        // 我们可以在这里准备接收数据块
-        const transferId = message.transferId;
-        props.currentTransfers[transferId].currentChunkOffset = message.offset;
-        props.currentTransfers[transferId].currentChunkSize = message.size;
+        haveRecievedFile.value[transferId] = receiveFileInfo;
+        props.receivedFileList.push(receiveFileInfo);
       }
+      haveRecievedFile.value[transferId].currentChunkOffset = offset;
+      haveRecievedFile.value[transferId].currentChunkSize = size;
     } catch (e) {
       console.error('Error parsing message:', e);
     }
-  } else {
-    // 二进制数据块
-    // 查找当前正在接收的传输
-    const activeTransferId = Object.keys(props.currentTransfers).find(
-      (id) =>
-        props.currentTransfers[id].status === 'receiving' &&
-        props.currentTransfers[id].currentChunkOffset !== undefined
+    return;
+  }
+
+  console.log('data', data);
+
+  // 二进制数据块
+  // 查找当前正在接收的传输文件名
+  const activeTransferId = Object.keys(haveRecievedFile.value).find(
+    (id) =>
+      haveRecievedFile.value[id].status === 'receiving' &&
+      id === message.value.transferId
+  );
+
+  if (activeTransferId) {
+    const transfer = haveRecievedFile.value[activeTransferId];
+
+    // 添加数据块到对应的文件
+    if (!props.receivedFileChunks[activeTransferId]) {
+      props.receivedFileChunks[activeTransferId] = [];
+    }
+
+    // 解密数据块
+    // const decryptedData = await decryptData(data);
+    props.receivedFileChunks[activeTransferId].push(data);
+
+    // 更新已接收大小
+    if (!props.receivedFileSizes[activeTransferId]) {
+      props.receivedFileSizes[activeTransferId] = 0;
+    }
+    props.receivedFileSizes[activeTransferId] += data.byteLength;
+
+    // 更新进度
+    transfer.progress = Math.ceil(
+      (transfer.currentChunkOffset / transfer.fileInfo.size) * 100
     );
 
-    if (activeTransferId) {
-      const transfer = props.currentTransfers[activeTransferId];
-
-      // 添加数据块到对应的文件
-      if (!props.receivedFileChunks[activeTransferId]) {
-        props.receivedFileChunks[activeTransferId] = [];
-      }
-
-      // 解密数据块
-      // const decryptedData = await decryptData(data);
-      props.receivedFileChunks[activeTransferId].push(data);
-
-      // 更新已接收大小
-      if (!props.receivedFileSizes[activeTransferId]) {
-        props.receivedFileSizes[activeTransferId] = 0;
-      }
-      props.receivedFileSizes[activeTransferId] += data.byteLength;
-
-      // 更新进度
-      transfer.progress = Math.floor(
-        (props.receivedFileSizes[activeTransferId] / transfer.fileInfo.size) *
-          100
+    // 检查文件是否接收完成
+    if (transfer.currentChunkOffset === transfer.fileInfo.size) {
+      // 创建完整文件
+      const receivedFile = new File(
+        props.receivedFileChunks[activeTransferId],
+        transfer.fileInfo.name,
+        { type: transfer.fileInfo.type }
       );
 
-      // 检查文件是否接收完成
-      if (
-        props.receivedFileSizes[activeTransferId] === transfer.fileInfo.size
-      ) {
-        // 创建完整文件
-        const receivedFile = new File(
-          props.receivedFileChunks[activeTransferId],
-          transfer.fileInfo.name,
-          { type: transfer.fileInfo.type }
-        );
+      console.log('received file:', receivedFile);
+      props.receivedFileList.find(
+        (file) => file.name === activeTransferId
+      ).receivedFile = receivedFile;
 
-        console.log('received file:', receivedFile);
-        props.receivedFileList.push(receivedFile);
-
-        // 清理资源
-        transfer.status = 'completed';
-        delete transfer.currentChunkOffset;
-        delete transfer.currentChunkSize;
-
-        setTimeout(() => {
-          delete props.receivedFileChunks[activeTransferId];
-          delete props.receivedFileSizes[activeTransferId];
-          delete props.currentTransfers[activeTransferId];
-        }, 100);
-      }
-
-      // 清除当前块信息，准备接收下一个块
+      // 清理资源
+      transfer.status = 'completed';
       delete transfer.currentChunkOffset;
       delete transfer.currentChunkSize;
+
+      setTimeout(() => {
+        delete props.receivedFileChunks[activeTransferId];
+        delete props.receivedFileSizes[activeTransferId];
+        delete props.currentTransfers[activeTransferId];
+      }, 100);
     }
   }
 }
@@ -322,15 +350,15 @@ function onSendChannelStateChange() {
 
   // 当通道打开时，设置缓冲区阈值和事件处理
   if (readyState === 'open') {
-    props.sendChannel.bufferedAmountLowThreshold = 65536; // 64KB
+    props.sendChannel.bufferedAmountLowThreshold = 113246208; // 16MB
     // 监控缓冲区状态
     const monitorBufferedAmount = () => {
       if (props.sendChannel && props.sendChannel.readyState === 'open') {
         const bufferedAmount = props.sendChannel.bufferedAmount;
-        if (bufferedAmount > 1048576) {
-          // 1MB
+        if (bufferedAmount > 113246208) {
+          // 16MB
           console.log(
-            `发送通道缓冲区较大: ${(bufferedAmount / 1048576).toFixed(2)}MB`
+            `发送通道缓冲区较大: ${(bufferedAmount / 113246208).toFixed(2)}MB`
           );
         }
         setTimeout(monitorBufferedAmount, 2000);
@@ -357,15 +385,15 @@ function onReceiveChannelStateChange() {
 
   // 当通道打开时，设置缓冲区阈值和事件处理
   if (readyState === 'open') {
-    props.receiveChannel.bufferedAmountLowThreshold = 65536; // 64KB
+    props.receiveChannel.bufferedAmountLowThreshold = 113246208; // 16MB
     // 监控缓冲区状态
     const monitorBufferedAmount = () => {
       if (props.receiveChannel && props.receiveChannel.readyState === 'open') {
         const bufferedAmount = props.receiveChannel.bufferedAmount;
-        if (bufferedAmount > 1048576) {
-          // 1MB
+        if (bufferedAmount > 113246208) {
+          // 16MB
           console.log(
-            `接收通道缓冲区较大: ${(bufferedAmount / 1048576).toFixed(2)}MB`
+            `接收通道缓冲区较大: ${(bufferedAmount / 113246208).toFixed(2)}MB`
           );
         }
         setTimeout(monitorBufferedAmount, 2000);
@@ -395,16 +423,6 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
   // 发送文件信息，包含传输ID和加密标志
   console.log('channel', channel);
 
-  channel.send(
-    JSON.stringify({
-      type: 'file-info',
-      transferId: transferId,
-      data: fileInfo,
-      encrypted: true,
-      uploadedSize: uploadedSize, // 发送已上传大小
-    })
-  );
-
   // 记录当前传输
   const info = {
     id: transferId,
@@ -414,29 +432,28 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
     uploadedSize: uploadedSize,
   };
 
-  currentTransfersInner.value[transferId] = info;
+  // 设置已经传送的文件信息
+  haveTransedFile.value[transferId] = info;
+  // ???
   props.currentTransfers[transferId] = info;
 
-  const chunkSize = 16384;
+  const chunkSize = 102400; // 256KB
+  // 每次发送一个完整都会重置
   fileReaders.value[transferId] = new FileReader();
   let offset = 0;
-
-  fileReaders.value[transferId].addEventListener('error', (error) =>
-    console.error(`Error reading file ${transferId}:`, error)
-  );
-
-  fileReaders.value[transferId].addEventListener('abort', (event) =>
-    console.log(`File reading aborted ${transferId}:`, event)
-  );
 
   // 添加缓冲区控制标志
   let sendingInProgress = false;
 
-  // 创建发送队列
+  // 创建文件碎片发送队列
   let sendQueue = [];
+
+  // 设置缓冲区阈值
+  channel.bufferedAmountLowThreshold = 113246208; // 12MB
 
   // 处理发送队列的函数
   const processSendQueue = () => {
+    // 如果正在发送或者发送完结 结束发送逻辑
     if (sendingInProgress || sendQueue.length === 0) {
       return;
     }
@@ -452,20 +469,25 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
     const item = sendQueue.shift();
 
     try {
+      // 发送文件
       channel.send(item);
       // 发送完成后处理下一个
       sendingInProgress = false;
       processSendQueue();
     } catch (error) {
       console.error('发送数据出错:', error);
-      // 出错时重新加入队列前端
+      // 如果已经断开连接，直接返回
       if (!con_status.value) return;
+
+      // 出错时重新加入队列稍后重试
       sendQueue.unshift(item);
       sendingInProgress = false;
-      // 稍后重试
       setTimeout(processSendQueue, 200);
     }
   };
+
+  // 当缓冲区低于阈值时继续发送
+  channel.onbufferedamountlow = processSendQueue;
 
   // 添加数据到发送队列
   const queueDataForSend = (data) => {
@@ -473,37 +495,38 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
     processSendQueue();
   };
 
-  // 设置缓冲区阈值
-  channel.bufferedAmountLowThreshold = 65536; // 64KB
+  fileReaders.value[transferId].addEventListener('error', (error) =>
+    console.error(`Error reading file ${transferId}:`, error)
+  );
 
-  // 当缓冲区低于阈值时继续发送
-  channel.onbufferedamountlow = processSendQueue;
+  fileReaders.value[transferId].addEventListener('abort', (event) =>
+    console.log(`File reading aborted ${transferId}:`, event)
+  );
 
   fileReaders.value[transferId].addEventListener('load', async (e) => {
+    // 应该在发送前将offset设置
+    offset += e.target.result.byteLength;
+
     // 准备元数据
     const chunkInfo = JSON.stringify({
       type: 'chunk-info',
       transferId: transferId,
       offset: offset,
       size: e.target.result.byteLength,
+      fileInfo,
     });
 
-    // 加密数据块
+    // 加密数据块 webrtc自带文件加密 使用 DTLS握手阶段的加密算法 SRTP数据传输阶段的加密算法
     // const encryptedChunk = await encryptData(e.target.result);
 
     // 将元数据和实际数据添加到发送队列
     queueDataForSend(chunkInfo);
     queueDataForSend(e.target.result);
-
-    offset += e.target.result.byteLength;
-
     // 更新进度
-    if (currentTransfersInner.value[transferId]) {
-      currentTransfersInner.value[transferId].progress = Math.floor(
-        (offset / data.size) * 100
-      );
-      currentTransfersInner.value[transferId].uploadedSize = offset;
-    }
+    haveTransedFile.value[transferId].progress = Math.floor(
+      (offset / data.size) * 100
+    );
+    haveTransedFile.value[transferId].uploadedSize = offset;
 
     if (offset < data.size) {
       // 控制读取速度，避免一次性读取过多数据
@@ -517,22 +540,24 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
           }
         }, 200);
       }
-    } else {
-      // 传输完成
-      console.log('传输完成');
-
-      // 传输完成，上传至alist
-      handleUpload2Alist(fileInfo, data);
-      currentTransfersInner.value[transferId].status = 'completed';
-
-      setTimeout(() => {
-        delete fileReaders.value[transferId];
-        delete props.currentTransfers[transferId];
-
-        // 检查队列中是否有等待的文件
-        processNextInQueue();
-      }, 100);
+      return;
     }
+    // 如果分片小于设置的分片大小，此时就回直接走这里，都没发送  不对只要加载完成就回放到对列发送
+
+    // 传输完成
+    console.log('传输完成');
+
+    // 传输完成，上传至alist
+    handleUpload2Alist(fileInfo, data);
+    haveTransedFile.value[transferId].status = 'completed';
+
+    setTimeout(() => {
+      delete fileReaders.value[transferId];
+      delete props.currentTransfers[transferId];
+
+      // 检查队列中是否有等待的文件
+      processNextInQueue();
+    }, 100);
   });
 
   const readSlice = (o) => {
@@ -550,20 +575,20 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
  */
 // 处理发送文件功能
 function sendData() {
-  // 清空传输队列
-  transferQueue.value = [];
-
-  // 获取要发送的文件列表
-  const filesToSend = [...localFilesList.value];
-
-  // 检查通道状态
+  // 传输前检查通道状态
   const channel = props.sendChannel ? props.sendChannel : props.receiveChannel;
   if (!channel || channel.readyState !== 'open') {
     console.error('数据通道未打开，无法发送文件');
     return;
   }
 
-  // 限制初始批次大小，避免一次性加载过多文件
+  // 清空传输队列
+  transferQueue.value = [];
+
+  // 获取要发送的文件列表 已经发送过的就不用发了
+  const filesToSend = [...localFilesList.value];
+
+  // 限制初始批次大小，避免一次性发送过多文件
   const initialBatchSize = Math.min(maxParallelTransfers, filesToSend.length);
 
   // 先发送初始批次
@@ -571,20 +596,11 @@ function sendData() {
     const item = filesToSend[i];
     const data = item.file;
     const uploadedSize = item.uploadedSize || 0; // 获取已上传大小
-
-    // console.log(
-    //   `开始发送文件: ${[
-    //     data.name,
-    //     data.size,
-    //     data.type,
-    //     data.lastModified,
-    //   ].join(' ')}, 已上传: ${uploadedSize} 字节`
-    // );
-
     const fileInfo = {
-      name: data.name,
-      size: data.size,
-      type: data.type,
+      name: item.name,
+      size: item.size,
+      type: item.type,
+      data: item.file,
     };
 
     // 开始传输
@@ -597,16 +613,17 @@ function sendData() {
     transferQueue.value.push({
       channel,
       fileInfo: {
-        name: item.file.name,
-        size: item.file.size,
-        type: item.file.type,
+        name: item.name,
+        size: item.size,
+        type: item.type,
+        data: item.file,
       },
       data: item.file,
       uploadedSize: item.uploadedSize || 0, // 保存已上传大小到队列
     });
   }
 
-  // 显示队列状态
+  // 显示队列状态 提示下
   if (transferQueue.value.length > 0) {
     console.log(
       `已将 ${transferQueue.value.length} 个文件加入发送队列，将在当前传输完成后依次发送`
@@ -633,12 +650,17 @@ const processNextInQueue = () => {
   }
 };
 
-const handleDrop = (e) => {
-  const files = e.dataTransfer.files;
-  if (files.length > 0) {
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+// 处理文件上传逻辑
+const handleListFile = (e) => {
+  const files = Array.from(e.dataTransfer.files);
+  if (!files || files.length === 0) return;
 
+  files.forEach((file) => {
+    const idx = localFilesList.value.findIndex(
+      (item) => item.name === file.name
+    );
+    // 如果还没上传过
+    if (idx === -1) {
       // 添加到本地文件列表
       localFilesList.value.push({
         name: file.name,
@@ -647,45 +669,33 @@ const handleDrop = (e) => {
         file: file, // 保存文件对象本身，以便后续发送
         date: new Date().toLocaleString(),
         progress: 0, // 初始化进度为0
-        uploadedSize: 0, // 初始化已上传大小
+        uploadedSize: 0, // 初始化已上传大小为0
       });
     }
-  }
+  });
 };
 
-const handleDeleteFile = (index) => {
-  localFilesList.value.splice(index, 1);
+// 拖动文件
+const handleDrop = (e) => {
+  handleListFile(e);
 };
 
-// 选择并发送文件
+// 选择文件
 const selectFile = () => {
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
   fileInput.multiple = true;
 
-  fileInput.onchange = (event) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-
-      // 如果已经上传，提示已上传
-      if (localFilesList.value.find((item) => {}))
-        // 添加到本地文件列表
-        localFilesList.value.push({
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          file: file, // 保存文件对象本身，以便后续发送
-          date: new Date().toLocaleString(),
-          progress: 0, // 初始化进度为0
-          uploadedSize: 0, // 初始化已上传大小为0
-        });
-    }
+  fileInput.onchange = (e) => {
+    handleListFile(e);
   };
 
   fileInput.click();
+};
+
+// 删除文件
+const handleDeleteFile = (index) => {
+  localFilesList.value.splice(index, 1);
 };
 
 // 清空文件列表
@@ -713,6 +723,7 @@ defineExpose({
 
 // 监听通道状态变化
 onMounted(() => {
+  getAlistToken();
   // 如果通道已经存在，设置事件处理函数
   if (props.sendChannel) {
     props.sendChannel.onmessage = onSendChannelMessageCallback;
@@ -748,6 +759,22 @@ onMounted(() => {
         justify-content: center;
       }
 
+      .receive-container {
+        .file-details {
+          .link_area {
+            margin-left: 5px;
+            padding: 5px;
+          }
+          .link {
+            color: #4a4a4a;
+
+            &:hover {
+              color: #23cca6;
+            }
+          }
+        }
+      }
+
       .file-list {
         width: 97%;
         height: 300px;
@@ -769,12 +796,17 @@ onMounted(() => {
           margin-bottom: 10px;
           background-color: #fff;
 
+          .btn {
+            padding: 5px;
+            height: 100%;
+          }
+
           .file-name {
             width: fit-content;
             color: #4a4a4a;
             font-size: 14px;
             padding: 5px 8px;
-            width: 300px;
+            width: 295px;
             text-overflow: ellipsis;
             white-space: nowrap;
             overflow: hidden;
@@ -823,6 +855,11 @@ onMounted(() => {
                   cursor: pointer;
                 }
               }
+            }
+
+            .has_completed {
+              display: flex;
+              align-items: center;
             }
           }
         }

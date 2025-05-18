@@ -65,9 +65,6 @@
           </div>
         </div>
         <div class="right-nav">
-          <el-button type="primary" class="nav-button" @click="handlePreview"
-            >预览</el-button
-          >
           <el-button type="primary" class="nav-button">下载所有</el-button>
           <el-button type="success" class="nav-button" @click="selectFile"
             >添加文件</el-button
@@ -281,14 +278,6 @@ async function createPeerConnection() {
             bitrateSeries.addPoint(now, bitrate);
             bitrateGraph.setDataSeries([bitrateSeries]);
             bitrateGraph.updateEndDate();
-
-            // calculate number of packets and append to chart
-            // packetSeries.addPoint(
-            //   now,
-            //   packets - lastResult.get(report.id).packetsSent
-            // );
-            // packetGraph.setDataSeries([packetSeries]);
-            // packetGraph.updateEndDate();
           }
 
           // statsOutput +=
