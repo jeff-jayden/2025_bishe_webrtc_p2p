@@ -544,7 +544,7 @@ onMounted(() => {
 
 <style scoped lang="less">
 .container {
-  height: 100vh;
+  height: 90vh;
 
   .header {
     height: 70px;

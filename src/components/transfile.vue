@@ -15,7 +15,7 @@
               :key="index"
               class="file-item"
             >
-              <div class="file-name">{{ file.name }}</div>
+              <div class="file-name">{{ getFileName(file.name) }}</div>
               <div class="file-details">
                 <el-button
                   class="btn"
@@ -56,7 +56,7 @@
               class="file-item"
             >
               <div class="file-name">
-                {{ file.name }}
+                {{ getFileName(file.name) }}
               </div>
               <div class="file-details">
                 <el-button
@@ -651,33 +651,68 @@ const processNextInQueue = () => {
 };
 
 // 处理文件上传逻辑
-const handleListFile = (e) => {
-  const files = Array.from(e.dataTransfer.files);
-  if (!files || files.length === 0) return;
+// 处理文件上传逻辑
+const getFileName = (filePath) => {
+  const parts = filePath.split('/');
+  return parts[parts.length - 1];
+};
 
-  files.forEach((file) => {
-    const idx = localFilesList.value.findIndex(
-      (item) => item.name === file.name
-    );
-    // 如果还没上传过
-    if (idx === -1) {
-      // 添加到本地文件列表
-      localFilesList.value.push({
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        file: file, // 保存文件对象本身，以便后续发送
-        date: new Date().toLocaleString(),
-        progress: 0, // 初始化进度为0
-        uploadedSize: 0, // 初始化已上传大小为0
+const handleListFile = async (items) => {
+  if (!items || items.length === 0) return;
+
+  const processEntry = async (entry, path = '') => {
+    if (entry.isFile) {
+      return new Promise((resolve) => {
+        entry.file((file) => {
+          const relativePath = path ? `${path}/${file.name}` : file.name;
+          const idx = localFilesList.value.findIndex(
+            (item) => item.name === relativePath
+          );
+          // 如果还没上传过
+          if (idx === -1) {
+            // 添加到本地文件列表
+            localFilesList.value.push({
+              name: relativePath,
+              size: file.size,
+              type: file.type,
+              file: file, // 保存文件对象本身，以便后续发送
+              date: new Date().toLocaleString(),
+              progress: 0, // 初始化进度为0
+              uploadedSize: 0, // 初始化已上传大小为0
+            });
+          }
+          resolve();
+        });
+      });
+    } else if (entry.isDirectory) {
+      const directoryReader = entry.createReader();
+      return new Promise((resolve) => {
+        directoryReader.readEntries(async (entries) => {
+          for (const subEntry of entries) {
+            await processEntry(
+              subEntry,
+              path ? `${path}/${entry.name}` : entry.name
+            );
+          }
+          resolve();
+        });
       });
     }
-  });
+  };
+
+  for (const item of items) {
+    const entry = item.webkitGetAsEntry();
+    if (entry) {
+      await processEntry(entry);
+    }
+  }
 };
 
 // 拖动文件
+
+// 拖动文件
 const handleDrop = (e) => {
-  handleListFile(e);
+  handleListFile(e.dataTransfer.items);
 };
 
 // 选择文件
@@ -687,7 +722,16 @@ const selectFile = () => {
   fileInput.multiple = true;
 
   fileInput.onchange = (e) => {
-    handleListFile(e);
+    // 对于文件选择器，直接获取文件列表
+    handleListFile(
+      Array.from(e.target.files).map((file) => ({
+        webkitGetAsEntry: () => ({
+          isFile: true,
+          name: file.name,
+          file: (callback) => callback(file),
+        }),
+      }))
+    );
   };
 
   fileInput.click();
@@ -743,6 +787,7 @@ onMounted(() => {
 .transfer-file {
   height: 100%;
   width: 100%;
+  background: #fff;
   position: relative;
   display: flex;
   justify-content: space-between;
