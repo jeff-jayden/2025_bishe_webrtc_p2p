@@ -525,9 +525,13 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
 
     // 检查通道缓冲区状态
     if (channel.bufferedAmount > channel.bufferedAmountLowThreshold) {
-      // 如果缓冲区较满，等待一段时间后再尝试
-      setTimeout(processSendQueue, 100);
-      return;
+      // 如果缓冲区较满，等待 onbufferedamountlow 事件
+      console.log(
+        `发送通道缓冲区较大，等待: ${(
+          channel.bufferedAmount / 113246208
+        ).toFixed(2)}MB`
+      );
+      return; // Stop processing the queue until bufferedAmountLow fires
     }
 
     sendingInProgress = true;
@@ -538,6 +542,7 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
       channel.send(item);
       // 发送完成后处理下一个
       sendingInProgress = false;
+      // Immediately try to process the next item if buffer allows
       processSendQueue();
     } catch (error) {
       console.error('发送数据出错:', error);
@@ -547,7 +552,7 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
       // 出错时重新加入队列稍后重试
       sendQueue.unshift(item);
       sendingInProgress = false;
-      setTimeout(processSendQueue, 200);
+      setTimeout(processSendQueue, 200); // Retry after a short delay
     }
   };
 
@@ -557,7 +562,10 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
   // 添加数据到发送队列
   const queueDataForSend = (data) => {
     sendQueue.push(data);
-    processSendQueue();
+    // Start processing the queue if not already in progress
+    if (!sendingInProgress) {
+      processSendQueue();
+    }
   };
 
   fileReaders.value[transferId].addEventListener('error', (error) =>
@@ -594,17 +602,8 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
     haveTransedFile.value[transferId].uploadedSize = offset;
 
     if (offset < data.size) {
-      // 控制读取速度，避免一次性读取过多数据
-      if (sendQueue.length < 10) {
-        readSlice(offset);
-      } else {
-        // 如果队列中已有较多数据，等待队列减少后再读取
-        setTimeout(() => {
-          if (sendQueue.length < 5) {
-            readSlice(offset);
-          }
-        }, 200);
-      }
+      // Read the next slice immediately after the current one is loaded
+      readSlice(offset);
       return;
     }
     // 如果分片小于设置的分片大小，此时就回直接走这里，都没发送  不对只要加载完成就回放到对列发送
@@ -722,8 +721,11 @@ const getFileName = (filePath) => {
   return parts[parts.length - 1];
 };
 
-const handleListFile = async (items) => {
+const handleListFile = async (items, isDrag = false) => {
   if (!items || items.length === 0) return;
+
+  // items are already FileSystemEntry objects extracted in handleDrop
+  const entriesToProcess = items;
 
   const processEntry = async (entry, path = '') => {
     if (entry.isFile) {
@@ -745,6 +747,7 @@ const handleListFile = async (items) => {
               progress: 0, // 初始化进度为0
               uploadedSize: 0, // 初始化已上传大小为0
             });
+            resolve();
           }
           resolve();
         });
@@ -765,6 +768,15 @@ const handleListFile = async (items) => {
     }
   };
 
+  // 拖拽上传的情况
+  if (isDrag) {
+    for (const entry of entriesToProcess) {
+      await processEntry(entry);
+    }
+    return;
+  }
+
+  // 选择文件的情况
   for (const item of items) {
     const entry = item.webkitGetAsEntry();
     if (entry) {
@@ -774,10 +786,23 @@ const handleListFile = async (items) => {
 };
 
 // 拖动文件
+const handleDrop = async (e) => {
+  e.preventDefault();
+  // 检查是否有文件被拖放
+  if (e.dataTransfer && e.dataTransfer.items) {
+    const items = e.dataTransfer.items;
+    const entriesToProcess = [];
 
-// 拖动文件
-const handleDrop = (e) => {
-  handleListFile(e.dataTransfer.items);
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const entry = item.webkitGetAsEntry();
+      if (entry) {
+        entriesToProcess.push(entry);
+      }
+    }
+
+    await handleListFile(entriesToProcess, true);
+  }
 };
 
 // 选择文件
