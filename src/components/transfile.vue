@@ -158,6 +158,7 @@ import { ElMessage } from 'element-plus';
 const URL = window.URL || window.webkitURL;
 const ALIST_DONMAIN = 'http://192.168.1.10:5244';
 const MINIO_DONMAIN = 'http://192.168.1.10:9000';
+const FILE_TYPE = ['png'];
 
 const con_status = ref(false);
 // 存放的是单独的要发送的完整文件
@@ -181,13 +182,17 @@ const props = defineProps({
   maxTransferData: Number,
 });
 
-const getAlistToken = async () => {
+const getFileList = () => {
   var myHeaders = new Headers();
+  myHeaders.append('Authorization', alistToken.value);
   myHeaders.append('Content-Type', 'application/json');
 
   var raw = JSON.stringify({
-    username: 'admin',
-    password: 'admin',
+    path: '/root',
+    password: '',
+    page: 1,
+    per_page: 0,
+    refresh: false,
   });
 
   var requestOptions = {
@@ -197,41 +202,101 @@ const getAlistToken = async () => {
     redirect: 'follow',
   };
 
-  fetch(`${ALIST_DONMAIN}/api/auth/login`, requestOptions)
-    .then((response) => response.text())
-    .then((result) => {
-      result = JSON.parse(result);
-      console.log(result);
-      alistToken.value = result;
-    })
-    .catch((error) => console.log('error', error));
-};
-
-const handleUpload2Alist = (fileInfo, data) => {
-  var myHeaders = new Headers();
-  myHeaders.append('Authorization', alistToken.value);
-  myHeaders.append('File-Path', `/root/${encodeURIComponent(fileInfo.name)}`);
-  myHeaders.append('As-Task', 'true');
-  myHeaders.append('Content-Length', '');
-  myHeaders.append('Content-Type', 'application/octet-stream');
-
-  const file = new File([data], fileInfo.name, { type: fileInfo.type });
-
-  var requestOptions = {
-    method: 'PUT',
-    headers: myHeaders,
-    body: file,
-    redirect: 'follow',
-  };
-
-  fetch(`${ALIST_DONMAIN}/api/fs/put`, requestOptions)
+  fetch(`${ALIST_DONMAIN}/api/fs/list`, requestOptions)
     .then((response) => response.text())
     .then((result) => console.log(result))
     .catch((error) => console.log('error', error));
 };
 
+const getMyInfo = () => {
+  var myHeaders = new Headers();
+  myHeaders.append('Authorization', alistToken.value);
+  fetch(`${ALIST_DONMAIN}/api/me`, myHeaders)
+    .then((response) => response.text())
+    .then((result) => console.log(result))
+    .catch((error) => console.log('error', error));
+};
+
+// 获取 AList 的认证 token
+const getAlistToken = async () => {
+  // 创建一个新的 Headers 对象，用于设置请求头
+  var myHeaders = new Headers();
+  // 设置 Content-Type 请求头为 application/json，表示请求体是 JSON 格式
+  myHeaders.append('Content-Type', 'application/json');
+
+  // 构建请求体，包含用户名和密码
+  var raw = JSON.stringify({
+    username: 'admin',
+    password: 'admin',
+  });
+
+  // 构建请求选项对象
+  var requestOptions = {
+    method: 'POST', // 请求方法为 POST
+    headers: myHeaders, // 设置请求头
+    body: raw, // 设置请求体
+    redirect: 'follow', // 设置重定向模式为 follow
+  };
+
+  // 发起 fetch 请求到 AList 的登录 API
+  fetch(`${ALIST_DONMAIN}/api/auth/login`, requestOptions)
+    // 处理响应，将其转换为文本
+    .then((response) => response.text())
+    // 处理文本结果，解析 JSON 并提取 token
+    .then((result) => {
+      result = JSON.parse(result);
+      console.log('getAlistToken', result);
+      // 将获取到的 token 赋值给 alistToken 的 ref
+      alistToken.value = result.data.token;
+    })
+    // 捕获并处理请求过程中发生的错误
+    .catch((error) => console.log('error', error));
+};
+
+// 定义处理上传文件到 AList 的函数，接收文件信息和文件数据
+const handleUpload2Alist = (fileInfo, data) => {
+  // 创建一个新的 Headers 对象，用于设置请求头
+  var myHeaders = new Headers();
+  // 添加 Authorization 请求头，使用 alistToken 进行认证
+  myHeaders.append('Authorization', alistToken.value);
+  // 添加 File-Path 请求头，指定文件在 AList 中的存放路径，对文件名进行编码
+  myHeaders.append('File-Path', `/root/${encodeURIComponent(fileInfo.name)}`);
+  // 添加 As-Task 请求头，指示 AList 将上传作为任务处理
+  myHeaders.append('As-Task', 'true');
+  // 添加 Content-Length 请求头，这里留空，fetch 会自动设置
+  myHeaders.append('Content-Length', '');
+  // 添加 Content-Type 请求头，指定文件类型为二进制流
+  myHeaders.append('Content-Type', 'application/octet-stream');
+
+  // 使用接收到的数据创建一个新的 File 对象
+  const file = new File([data], fileInfo.name, { type: fileInfo.type });
+
+  // 构建请求选项对象
+  var requestOptions = {
+    method: 'PUT', // 请求方法为 PUT，用于上传文件
+    headers: myHeaders, // 设置请求头
+    body: file, // 设置请求体为文件数据
+    redirect: 'follow', // 设置重定向模式为 follow
+  };
+
+  // 打印 token 值（用于调试）
+  console.log('token', alistToken.value);
+
+  // 发起 fetch 请求到 AList 的文件上传 API
+  fetch(`${ALIST_DONMAIN}/api/fs/put`, requestOptions)
+    // 处理响应，将其转换为文本
+    .then((response) => response.text())
+    // 处理文本结果，打印上传结果（用于调试）
+    .then((result) => console.log('fsresult', result))
+    // 捕获并处理请求过程中发生的错误
+    .catch((error) => console.log('error', error));
+};
+
 const handlePreview = (fileName) => {
+  // 构建要预览文件的完整访问 URL，这里使用了 MINIO_DONMAIN 和文件路径
   var url = `${MINIO_DONMAIN}/miniodemo/root/${fileName}`; //要预览文件的访问地址
+  // 打开一个新的浏览器窗口或标签页来在线预览文件
+  // 使用 encodeURIComponent 和 encode 对 URL 进行编码，以确保特殊字符正确处理
   window.open(
     'http://127.0.0.1:8012/onlinePreview?url=' + encodeURIComponent(encode(url))
   );
@@ -749,6 +814,8 @@ const clearFiles = () => {
 
 const connectAlist = async () => {
   await getAlistToken();
+  getMyInfo();
+  getFileList();
 };
 
 // 暴露方法给父组件
@@ -767,7 +834,8 @@ defineExpose({
 
 // 监听通道状态变化
 onMounted(() => {
-  getAlistToken();
+  // getAlistToken();
+  connectAlist();
   // 如果通道已经存在，设置事件处理函数
   if (props.sendChannel) {
     props.sendChannel.onmessage = onSendChannelMessageCallback;

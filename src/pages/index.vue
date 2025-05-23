@@ -247,6 +247,7 @@ const hangup = () => {
 
 async function createPeerConnection() {
   console.log('createPeerConnection-----');
+  // 创建 peerconnection
   pc.value = new RTCPeerConnection(configuration.value);
 
   // 创建图
@@ -254,56 +255,51 @@ async function createPeerConnection() {
   const bitrateGraph = new TimelineGraphView('bitrateGraph', 'bitrateCanvas');
   bitrateGraph.updateEndDate();
 
-  // 设置数据分析;
+  // 每秒获取一次 WebRTC 统计信息
   setInterval(() => {
+    // 获取 RTCPeerConnection 的统计信息
     pc.value.getStats().then((stats) => {
+      // 打印统计信息到控制台
       console.log('states', stats);
       let statsOutput = '';
 
+      // 遍历所有统计报告
       stats.forEach((report) => {
+        // 查找数据通道或传输相关的报告
         if (report.type === 'data-channel' || report.type === 'transport') {
+          // 获取当前时间戳和发送的字节数
           const now = report.timestamp;
           const bytes = report.bytesSent;
 
-          const packets = report.packetsSent;
+          // 如果存在上一次的结果并且包含当前报告的ID
           if (lastResult.value && lastResult.value.has(report.id)) {
-            // calculate bitrate
+            // 计算比特率 (bytes * 8 bits / time difference in seconds)
             const bitrate =
-              (8 * (bytes - lastResult.value.get(report.id).bytesSent)) /
-              (now - lastResult.value.get(report.id).timestamp);
+              (8 * (bytes - lastResult.value.get(report.id).bytesSent)) / // 计算字节差并转换为比特
+              (now - lastResult.value.get(report.id).timestamp); // 计算时间差（毫秒）
 
+            // 打印计算出的比特率
             console.log('bitrate', bitrate);
+            // 更新最大传输速率
             maxTransferData.value = Math.max(maxTransferData.value, bitrate);
-            // append to chart
+            // 将当前时间戳和比特率添加到时间线数据系列
             bitrateSeries.addPoint(now, bitrate);
+            // 更新比特率图表的数据系列
             bitrateGraph.setDataSeries([bitrateSeries]);
+            // 更新比特率图表的结束时间
             bitrateGraph.updateEndDate();
           }
-
-          // statsOutput +=
-          //   `<h2>Report: ${report.type}</h2>\n<strong>ID:</strong> ${report.id}<br>\n` +
-          //   `<strong>Timestamp:</strong> ${report.timestamp}<br>\n`;
-
-          // // Now the statistics for this report; we intentionally drop the ones we
-          // // sorted to the top above
-
-          // Object.keys(report).forEach((statName) => {
-          //   if (
-          //     statName !== 'id' &&
-          //     statName !== 'timestamp' &&
-          //     statName !== 'type'
-          //   ) {
-          //     statsOutput += `<strong>${statName}:</strong> ${report[statName]}<br>\n`;
-          //   }
-          // });
         }
       });
 
+      // 保存当前统计结果供下次计算使用
       lastResult.value = stats;
-      transfileRef.value.statsbox.innerHTML = statsOutput;
+      // 将统计输出显示在页面上 (如果 statsbox 存在)
+      // transfileRef.value.statsbox.innerHTML = statsOutput;
     });
-  }, 1000);
+  }, 1000); // 每1000毫秒（1秒）执行一次
 
+  // 监听 ice 事件
   pc.value.onicecandidate = (e) => {
     const message = {
       type: 'candidate',
@@ -315,6 +311,7 @@ async function createPeerConnection() {
       message.sdpMLineIndex = e.candidate.sdpMLineIndex;
     }
     console.log('message', message);
+    // 发送 ice 信息
     signaling.value.postMessage(message);
   };
   if (activeTab.value === 'video' && transvideoRef.value) {
@@ -368,13 +365,13 @@ async function handleAnswer(answer) {
   }
   await pc.value.setRemoteDescription(answer);
 
-  // 成功设置对方的连接信息
-  // 改变连接状态
+  // 成功设置对方的连接信息改变连接状态
   transfileRef.value.con_status = true;
   // 同时发送信号给对方改变状态
   signaling.value.postMessage({ type: 'connction', status: 'connected' });
 }
 
+// 处理 ice 信息交换
 async function handleCandidate(candidate) {
   console.log('handleCandidate------');
   console.log('candidate', candidate);
@@ -385,25 +382,25 @@ async function handleCandidate(candidate) {
   if (!candidate.candidate) {
     await pc.value.addIceCandidate(null);
   } else {
+    // 添加 ice 信息
     await pc.value.addIceCandidate(candidate);
   }
 }
 
-// 接收方
+// 接收方处理发送方 offer
 async function handleOffer(offer) {
   console.log('handleOffer------');
-  // if (pc.value) {
-  //   console.error('existing peerconnection');
-  //   return;
-  // }
+  // 创建 p2p 连接对象
   await createPeerConnection();
+  // 监听数据通道
   pc.value.ondatachannel = receiveChannelCallback;
   // 接收方设置发送方的连接信息
   await pc.value.setRemoteDescription(offer);
-
-  // 创建接受方的连接信息   这时候应该还是旧的answer
+  // 创建接受方的连接信息
   const answer = await pc.value.createAnswer();
+  // 发送 answer 信息
   signaling.value.postMessage({ type: 'answer', sdp: answer.sdp });
+  // 设置本地连接信息
   await pc.value.setLocalDescription(answer);
 }
 
@@ -437,7 +434,9 @@ function receiveChannelCallback(event) {
 // 开始创建连接入口  发送方
 const startFn = async () => {
   console.log('startFn-----');
+  // 创建 p2p 连接对象
   await createPeerConnection();
+  // 创建数据通道
   sendChannel.value = pc.value.createDataChannel('sendDataChannel');
 
   // 通道事件处理将在组件中设置
@@ -459,7 +458,9 @@ const startFn = async () => {
 
   // 创建发送方的连接信息
   const offer = await pc.value.createOffer();
+  // 发送 offer 信息
   signaling.value.postMessage({ type: 'offer', sdp: offer.sdp });
+  // 设置本地连接信息
   await pc.value.setLocalDescription(offer);
 };
 
