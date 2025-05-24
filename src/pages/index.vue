@@ -65,15 +65,14 @@
           </div>
         </div>
         <div class="right-nav">
-          <el-button type="primary" class="nav-button">下载所有</el-button>
-          <el-button type="success" class="nav-button" @click="selectFile"
-            >添加文件</el-button
+          <el-button type="primary" class="nav-button" @click="downloadAllFiles"
+            >下载所有</el-button
           >
           <el-button
             type="danger"
             class="nav-button nav-button-clear"
             @click="clearFiles"
-            >清空已上传文件</el-button
+            >清空已上传</el-button
           >
           <!-- 添加断开连接按钮 -->
           <el-button
@@ -160,6 +159,26 @@ const transtextRef = ref(null);
 const transvideoRef = ref(null);
 const transscreenRef = ref(null);
 
+// 下载所有接收到的文件
+const downloadAllFiles = () => {
+  if (transfileRef.value && receivedFileList.value.length > 0) {
+    receivedFileList.value.forEach((file) => {
+      if (file.receivedFile && file.status === 'completed') {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(file.receivedFile);
+        link.download = file.name;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href); // 释放URL对象
+      }
+    });
+    ElMessage.success('已开始下载所有已接收的文件！');
+  } else {
+    ElMessage.info('没有已接收或已完成的文件可供下载。');
+  }
+};
+
 //预览文件功能
 const handlePreview = () => {
   var url = `${MINIO_DONMAIN}/miniodemo/root/总体架构图.png`; //要预览文件的访问地址
@@ -170,8 +189,30 @@ const handlePreview = () => {
 
 // 清空文件列表
 const clearFiles = () => {
+  if (!transfileRef?.value.localFilesList.length) {
+    ElMessage.error('请先上传文件 亲～');
+    return;
+  }
+
   if (transfileRef.value) {
-    transfileRef.value.clearFiles();
+    ElMessageBox.confirm('确认清空已上传的文件吗？', '提示', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+      .then(() => {
+        transfileRef.value.clearFiles();
+        ElMessage({
+          type: 'success',
+          message: '清空成功',
+        });
+      })
+      .catch(() => {
+        ElMessage({
+          type: 'warning',
+          message: '清空失败',
+        });
+      });
   }
 };
 

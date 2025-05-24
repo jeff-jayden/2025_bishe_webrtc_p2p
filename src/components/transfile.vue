@@ -36,7 +36,7 @@
                   class="delete_btn"
                   @click="handleDeleteFile(index)"
                 >
-                  <el-tooltip content="sure delete???" placement="top"
+                  <el-tooltip content="删除" placement="top"
                     ><close-one class="close" theme="outline" size="16"
                   /></el-tooltip>
                 </div>
@@ -894,6 +894,7 @@ defineExpose({
   con_status,
   bitrateCanvas,
   isSelf,
+  localFilesList,
 });
 
 // 监听通道状态变化
