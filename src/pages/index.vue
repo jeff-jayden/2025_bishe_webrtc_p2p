@@ -73,8 +73,17 @@
             type="danger"
             class="nav-button nav-button-clear"
             @click="clearFiles"
-            >清空</el-button
+            >清空已上传文件</el-button
           >
+          <!-- 添加断开连接按钮 -->
+          <el-button
+            v-if="transfileRef?.con_status"
+            type="danger"
+            class="disconnect-btn"
+            @click="handleDisconnect"
+          >
+            断开连接
+          </el-button>
         </div>
       </div>
       <Transfile
@@ -230,6 +239,48 @@ const switchFunction = (tab) => {
       }
     }
   });
+};
+
+const discInner = (channel, shenfen) => {
+  channel.close();
+  channel = null;
+  transfileRef.value.con_status = false;
+  transfileRef.value.isSelf = true;
+  signaling.value.postMessage({ type: 'disconncted', shenfen });
+};
+
+// 处理主动断开连接的函数
+const handleDisconnect = () => {
+  console.log('Attempting to disconnect...');
+  // 当是sendChannel方主动断开连接，先断开自己的，再发个消息给对方，对方也断开
+  if (sendChannel.value) {
+    discInner(sendChannel.value, 'sendChannel');
+  } else if (receiveChannel.value) {
+    // 当是receiveChannel方主动断开连接，先断开自己的，再发个消息给对方，对方也断开
+    discInner(receiveChannel.value, 'receiveChannel');
+  }
+};
+
+const singDiscInner = (channel) => {
+  channel.close();
+  channel = null;
+  transfileRef.value.con_status = false;
+  // todo 有歧义，可能得换个变量名
+  transfileRef.value.isSelf = true;
+  if (transfileRef.value.isSelf) {
+    ElMessage.error('对方断开连接...请确认～');
+  }
+  return;
+};
+
+const signalingDisconncted = (shenfen) => {
+  console.log('signalingDisconncted-----', shenfen);
+  if (shenfen === 'sendChannel') {
+    singDiscInner(receiveChannel.value);
+  }
+  if (shenfen === 'receiveChannel') {
+    singDiscInner(sendChannel.value);
+  }
 };
 
 const hangup = () => {
@@ -465,26 +516,22 @@ const startFn = async () => {
 };
 
 const sureConnect = (data) => {
-  ElMessageBox.confirm(
-    `Would you like to accept a connection from ${data.name}?`,
-    'Warning',
-    {
-      confirmButtonText: 'OK',
-      cancelButtonText: 'Cancel',
-      type: 'warning',
-    }
-  )
+  ElMessageBox.confirm(`要接受来自 ${data.name} 的连接邀请吗?`, 'Warning', {
+    confirmButtonText: 'OK',
+    cancelButtonText: 'Cancel',
+    type: 'warning',
+  })
     .then(() => {
       ElMessage({
         type: 'success',
-        message: 'you agreed to connect',
+        message: '连接成功',
       });
       startFn();
     })
     .catch(() => {
       ElMessage({
-        type: 'info',
-        message: 'connect canceled',
+        type: 'error',
+        message: '取消连接',
       });
     });
 };
@@ -513,6 +560,9 @@ onMounted(() => {
         break;
       case 'connction':
         transfileRef.value.con_status = e.data.status === 'connected';
+        break;
+      case 'disconncted':
+        signalingDisconncted(e.data.shenfen);
         break;
       case 'ready':
         if (pc.value) {

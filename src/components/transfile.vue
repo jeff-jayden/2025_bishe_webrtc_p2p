@@ -43,6 +43,13 @@
                 <div v-else class="has_completed">
                   <span class="txt">已发送</span>
                 </div>
+                <div
+                  v-if="haveTransedFile[file.name]?.status === 'transferring'"
+                  class="cancel_btn"
+                  @click="handleCancelTransfer(file.name)"
+                >
+                  <el-button type="danger" size="small">取消</el-button>
+                </div>
               </div>
             </div>
           </div>
@@ -102,7 +109,7 @@
         </el-button>
         <div class="con-status">
           <div class="connected" v-if="con_status">
-            <Dot
+            <dot
               theme="outline"
               size="16"
               fill="#08b18f"
@@ -153,16 +160,18 @@ import { CloseOne, Dot, Download } from '@icon-park/vue-next';
 import { ref, onMounted } from 'vue';
 import { encode } from 'js-base64';
 import { ElMessage } from 'element-plus';
+import { encryptData, decryptData } from '@/utils/crypto';
 
 // 获取URL对象，用于创建文件下载链接
 const URL = window.URL || window.webkitURL;
 const ALIST_DONMAIN = 'http://192.168.1.10:5244';
 const MINIO_DONMAIN = 'http://192.168.1.10:9000';
-const FILE_TYPE = ['png'];
 
 const con_status = ref(false);
 // 存放的是单独的要发送的完整文件
 const transferQueue = ref([]);
+// 用于存放当前分块的信息
+const message = ref();
 const fileReaders = ref({});
 const localFilesList = ref([]);
 const maxParallelTransfers = 3; // 最大并行传输数量
@@ -302,16 +311,13 @@ const handlePreview = (fileName) => {
   );
 };
 
-// 用于存放当前分块的信息
-const message = ref();
-
 // 接收文件处理函数
 async function onReceiveChannelMessageCallback(event) {
   console.log('Received Message');
 
-  const data = event.data;
+  let data = event.data;
 
-  if (typeof data === 'string') {
+  if (typeof data === 'string' && data.startsWith('{')) {
     try {
       message.value = JSON.parse(data);
 
@@ -339,8 +345,6 @@ async function onReceiveChannelMessageCallback(event) {
     return;
   }
 
-  console.log('data', data);
-
   // 二进制数据块
   // 查找当前正在接收的传输文件名
   const activeTransferId = Object.keys(haveRecievedFile.value).find(
@@ -356,9 +360,8 @@ async function onReceiveChannelMessageCallback(event) {
     if (!props.receivedFileChunks[activeTransferId]) {
       props.receivedFileChunks[activeTransferId] = [];
     }
-
     // 解密数据块
-    // const decryptedData = await decryptData(data);
+    data = await decryptData(data);
     props.receivedFileChunks[activeTransferId].push(data);
 
     // 更新已接收大小
@@ -406,6 +409,9 @@ function onSendChannelMessageCallback(event) {
   onReceiveChannelMessageCallback(event);
 }
 
+// 用于表示连接断开是不是自己触发的
+const isSelf = ref(false);
+
 // 发送通道状态变化处理函数
 function onSendChannelStateChange() {
   if (!props.sendChannel) return;
@@ -425,8 +431,8 @@ function onSendChannelStateChange() {
           console.log(
             `发送通道缓冲区较大: ${(bufferedAmount / 113246208).toFixed(2)}MB`
           );
+          setTimeout(monitorBufferedAmount, 2000);
         }
-        setTimeout(monitorBufferedAmount, 2000);
       }
     };
     monitorBufferedAmount();
@@ -435,7 +441,9 @@ function onSendChannelStateChange() {
 
   con_status.value = false;
 
-  if (!con_status.value) {
+  if (!con_status.value && !isSelf.value) {
+    console.log('sendChannel');
+
     ElMessage.error('对方连接断开，请重试！');
     stopSendData();
   }
@@ -469,16 +477,46 @@ function onReceiveChannelStateChange() {
   }
 
   con_status.value = false;
-
-  if (!con_status.value) {
+  if (!con_status.value && !isSelf.value) {
+    console.log('receiveChannel');
     ElMessage.error('对方连接断开，请重试！');
     stopSendData();
   }
 }
 
 const stopSendData = () => {
-  sendQueue = [];
+  if (sendData.length) sendQueue = [];
   transferQueue.value = [];
+};
+
+// 处理取消传输的函数
+const handleCancelTransfer = (fileName) => {
+  console.log(`Cancelling transfer for file: ${fileName}`);
+  // 查找对应的 FileReader
+  const fileReader = fileReaders.value[fileName];
+  if (fileReader) {
+    // 中断文件读取
+    fileReader.abort();
+    console.log(`File reading aborted for ${fileName}`);
+  }
+
+  // 更新文件状态为 cancelled
+  if (haveTransedFile.value[fileName]) {
+    haveTransedFile.value[fileName].status = 'cancelled';
+    // haveTransedFile.value[fileName].progress = 0; // Reset progress
+    console.log(`Transfer status updated to cancelled for ${fileName}`);
+  }
+
+  // 从传输队列和当前传输列表中移除文件
+  transferQueue.value = transferQueue.value.filter(
+    (file) => file.name !== fileName
+  );
+  if (props.currentTransfers[fileName]) {
+    delete props.currentTransfers[fileName];
+    console.log(`Removed ${fileName} from currentTransfers`);
+  }
+
+  // TODO: Optionally send a cancellation message to the peer
 };
 
 const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
@@ -590,11 +628,11 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
     });
 
     // 加密数据块 webrtc自带文件加密 使用 DTLS握手阶段的加密算法 SRTP数据传输阶段的加密算法
-    // const encryptedChunk = await encryptData(e.target.result);
+    const encryptedChunk = await encryptData(e.target.result);
 
     // 将元数据和实际数据添加到发送队列
     queueDataForSend(chunkInfo);
-    queueDataForSend(e.target.result);
+    queueDataForSend(encryptedChunk);
     // 更新进度
     haveTransedFile.value[transferId].progress = Math.floor(
       (offset / data.size) * 100
@@ -855,6 +893,7 @@ defineExpose({
   statsbox,
   con_status,
   bitrateCanvas,
+  isSelf,
 });
 
 // 监听通道状态变化
@@ -1007,6 +1046,7 @@ onMounted(() => {
 
   .right_area {
     width: 50%;
+    position: relative; // Add position relative for absolute positioning of the button
   }
 
   .drop-area:hover,

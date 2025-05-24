@@ -42,21 +42,15 @@ export const decryptData = async (encryptedData) => {
       padding: CryptoJS.pad.Pkcs7
     }
   );
-  
-  // 返回Uint8Array类型数据用于二进制处理
-  const words = decrypted.toString(CryptoJS.enc.Utf8);
-  if (words) {
-    return words;
-  }
-  
+
   // 返回ArrayBuffer类型数据
-  const wordArray = decrypted;
-  const arrayBuffer = new ArrayBuffer(wordArray.sigBytes);
+  const wordArray = decrypted.words;
+  const arrayBuffer = new ArrayBuffer(decrypted.sigBytes);
   const uint8Array = new Uint8Array(arrayBuffer);
-  
-  for (let i = 0; i < wordArray.sigBytes; i++) {
-    uint8Array[i] = (wordArray.words[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
+
+  for (let i = 0; i < decrypted.sigBytes; i++) {
+    uint8Array[i] = (wordArray[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff;
   }
-  
+
   return arrayBuffer;
 };
