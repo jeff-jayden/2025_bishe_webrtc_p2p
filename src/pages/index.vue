@@ -87,14 +87,15 @@
       </div>
       <Transfile
         v-if="activeTab === 'file'"
+        ref="transfileRef"
         :receivedFileList="receivedFileList"
         :sendChannel="sendChannel"
         :receiveChannel="receiveChannel"
         :currentTransfers="currentTransfers"
         :receivedFileChunks="receivedFileChunks"
         :receivedFileSizes="receivedFileSizes"
-        ref="transfileRef"
         :maxTransferData="maxTransferData"
+        :realTimeRate="realTimeRate"
       />
       <Transtext
         v-if="activeTab === 'text'"
@@ -144,6 +145,7 @@ const receiveChannel = ref();
 const currentTransfers = ref({});
 const lastResult = ref();
 const maxTransferData = ref(0);
+const realTimeRate = ref();
 
 // 配置STUN服务器，帮助NAT穿透
 const configuration = ref({
@@ -175,7 +177,7 @@ const downloadAllFiles = () => {
     });
     ElMessage.success('已开始下载所有已接收的文件！');
   } else {
-    ElMessage.info('没有已接收或已完成的文件可供下载。');
+    ElMessage.error('没有已接收或已完成的文件可供下载。');
   }
 };
 
@@ -210,7 +212,7 @@ const clearFiles = () => {
       .catch(() => {
         ElMessage({
           type: 'warning',
-          message: '清空失败',
+          message: '取消清空',
         });
       });
   }
@@ -324,19 +326,6 @@ const signalingDisconncted = (shenfen) => {
   }
 };
 
-const hangup = () => {
-  if (pc.value) {
-    pc.value.close();
-    pc.value = null;
-  }
-  if (activeTab.value === 'video' && transvideoRef.value) {
-    transvideoRef.value.endVideoCall();
-  }
-  if (activeTab.value === 'screen' && transscreenRef.value) {
-    transscreenRef.value.stopScreenShare();
-  }
-};
-
 async function createPeerConnection() {
   console.log('createPeerConnection-----');
   // 创建 peerconnection
@@ -365,15 +354,18 @@ async function createPeerConnection() {
 
           // 如果存在上一次的结果并且包含当前报告的ID
           if (lastResult.value && lastResult.value.has(report.id)) {
-            // 计算比特率 (bytes * 8 bits / time difference in seconds)
+            // 计算MB/s ((bytes2 - bytes1) / 1024 / 1024 / (time2 - time1) / 1000)
             const bitrate =
-              (8 * (bytes - lastResult.value.get(report.id).bytesSent)) / // 计算字节差并转换为比特
-              (now - lastResult.value.get(report.id).timestamp); // 计算时间差（毫秒）
-
+              (bytes - lastResult.value.get(report.id).bytesSent) /
+              ((now - lastResult.value.get(report.id).timestamp) / 1000); // 计算时间差（毫秒）
             // 打印计算出的比特率
             console.log('bitrate', bitrate);
             // 更新最大传输速率
-            maxTransferData.value = Math.max(maxTransferData.value, bitrate);
+            maxTransferData.value = Math.max(
+              maxTransferData.value,
+              bitrate.toFixed(2)
+            );
+            realTimeRate.value = bitrate.toFixed(2);
             // 将当前时间戳和比特率添加到时间线数据系列
             bitrateSeries.addPoint(now, bitrate);
             // 更新比特率图表的数据系列
@@ -381,13 +373,25 @@ async function createPeerConnection() {
             // 更新比特率图表的结束时间
             bitrateGraph.updateEndDate();
           }
+          // statsOutput +=
+          //   `<h2>Report: ${report.type}</h2>\n<strong>ID:</strong> ${report.id}<br>\n` +
+          //   `<strong>Timestamp:</strong> ${report.timestamp}<br>\n`;
+          // Object.keys(report).forEach((statName) => {
+          //   if (
+          //     statName !== 'id' &&
+          //     statName !== 'timestamp' &&
+          //     statName !== 'type'
+          //   ) {
+          //     statsOutput += `<strong>${statName}:</strong> ${report[statName]}<br>\n`;
+          //   }
+          // });
         }
       });
 
       // 保存当前统计结果供下次计算使用
       lastResult.value = stats;
       // 将统计输出显示在页面上 (如果 statsbox 存在)
-      // transfileRef.value.statsbox.innerHTML = statsOutput;
+      transfileRef.value.statsbox.innerHTML = statsOutput;
     });
   }, 1000); // 每1000毫秒（1秒）执行一次
 
@@ -616,11 +620,6 @@ onMounted(() => {
           return;
         }
         sureConnect(e.data);
-        break;
-      case 'bye':
-        if (pc) {
-          hangup();
-        }
         break;
       default:
         console.log('unhandled', e);

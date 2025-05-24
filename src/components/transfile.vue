@@ -32,7 +32,10 @@
                   class="progress"
                 />
                 <div
-                  v-if="haveTransedFile[file.name]?.status !== 'completed'"
+                  v-if="
+                    haveTransedFile[file.name]?.status !== 'completed' &&
+                    haveTransedFile[file.name]?.status !== 'transferring'
+                  "
                   class="delete_btn"
                   @click="handleDeleteFile(index)"
                 >
@@ -40,7 +43,10 @@
                     ><close-one class="close" theme="outline" size="16"
                   /></el-tooltip>
                 </div>
-                <div v-else class="has_completed">
+                <div
+                  v-if="haveTransedFile[file.name]?.status === 'completed'"
+                  class="has_completed"
+                >
                   <span class="txt">已发送</span>
                 </div>
                 <div
@@ -148,6 +154,7 @@
           ></canvas>
           <div v-if="con_status">
             maxSpeed: {{ (maxTransferData / 1000 / 1000).toFixed(2) }} MB/s
+            realTimeRate: {{ (realTimeRate / 1000 / 1000).toFixed(2) }} MB/s
           </div>
         </div>
       </div>
@@ -174,7 +181,7 @@ const transferQueue = ref([]);
 const message = ref();
 const fileReaders = ref({});
 const localFilesList = ref([]);
-const maxParallelTransfers = 3; // 最大并行传输数量
+const maxParallelTransfers = 10; // 最大并行传输数量
 const haveTransedFile = ref({});
 const haveRecievedFile = ref({});
 const alistToken = ref('');
@@ -189,6 +196,7 @@ const props = defineProps({
   receivedFileChunks: Object,
   receivedFileSizes: Object,
   maxTransferData: Number,
+  realTimeRate: Number,
 });
 
 const getFileList = () => {
@@ -384,7 +392,6 @@ async function onReceiveChannelMessageCallback(event) {
         { type: transfer.fileInfo.type }
       );
 
-      console.log('received file:', receivedFile);
       props.receivedFileList.find(
         (file) => file.name === activeTransferId
       ).receivedFile = receivedFile;
@@ -421,15 +428,15 @@ function onSendChannelStateChange() {
 
   // 当通道打开时，设置缓冲区阈值和事件处理
   if (readyState === 'open') {
-    props.sendChannel.bufferedAmountLowThreshold = 113246208; // 16MB
+    props.sendChannel.bufferedAmountLowThreshold = 16777216; // 16MB 104857600
     // 监控缓冲区状态
     const monitorBufferedAmount = () => {
       if (props.sendChannel && props.sendChannel.readyState === 'open') {
         const bufferedAmount = props.sendChannel.bufferedAmount;
-        if (bufferedAmount > 113246208) {
+        if (bufferedAmount > 16777216) {
           // 16MB
           console.log(
-            `发送通道缓冲区较大: ${(bufferedAmount / 113246208).toFixed(2)}MB`
+            `发送通道缓冲区较大: ${(bufferedAmount / 16777216).toFixed(2)}MB`
           );
           setTimeout(monitorBufferedAmount, 2000);
         }
@@ -458,15 +465,15 @@ function onReceiveChannelStateChange() {
 
   // 当通道打开时，设置缓冲区阈值和事件处理
   if (readyState === 'open') {
-    props.receiveChannel.bufferedAmountLowThreshold = 113246208; // 16MB
+    props.receiveChannel.bufferedAmountLowThreshold = 16777216; // 16MB
     // 监控缓冲区状态
     const monitorBufferedAmount = () => {
       if (props.receiveChannel && props.receiveChannel.readyState === 'open') {
         const bufferedAmount = props.receiveChannel.bufferedAmount;
-        if (bufferedAmount > 113246208) {
+        if (bufferedAmount > 16777216) {
           // 16MB
           console.log(
-            `接收通道缓冲区较大: ${(bufferedAmount / 113246208).toFixed(2)}MB`
+            `接收通道缓冲区较大: ${(bufferedAmount / 16777216).toFixed(2)}MB`
           );
         }
         setTimeout(monitorBufferedAmount, 2000);
@@ -540,7 +547,7 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
   // ???
   props.currentTransfers[transferId] = info;
 
-  const chunkSize = 102400; // 256KB
+  const chunkSize = 191488; // 187KB
   // 每次发送一个完整都会重置
   fileReaders.value[transferId] = new FileReader();
   let offset = 0;
@@ -615,6 +622,8 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
   );
 
   fileReaders.value[transferId].addEventListener('load', async (e) => {
+    if (!con_status.value) return;
+
     // 应该在发送前将offset设置
     offset += e.target.result.byteLength;
 
@@ -633,6 +642,7 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
     // 将元数据和实际数据添加到发送队列
     queueDataForSend(chunkInfo);
     queueDataForSend(encryptedChunk);
+
     // 更新进度
     haveTransedFile.value[transferId].progress = Math.floor(
       (offset / data.size) * 100
@@ -873,6 +883,7 @@ const handleDeleteFile = (index) => {
 // 清空文件列表
 const clearFiles = () => {
   localFilesList.value = [];
+  haveTransedFile.value = {};
 };
 
 const connectAlist = async () => {
@@ -899,20 +910,7 @@ defineExpose({
 
 // 监听通道状态变化
 onMounted(() => {
-  // getAlistToken();
   connectAlist();
-  // 如果通道已经存在，设置事件处理函数
-  if (props.sendChannel) {
-    props.sendChannel.onmessage = onSendChannelMessageCallback;
-    props.sendChannel.onopen = onSendChannelStateChange;
-    props.sendChannel.onclose = onSendChannelStateChange;
-  }
-
-  if (props.receiveChannel) {
-    props.receiveChannel.onmessage = onReceiveChannelMessageCallback;
-    props.receiveChannel.onopen = onReceiveChannelStateChange;
-    props.receiveChannel.onclose = onReceiveChannelStateChange;
-  }
 });
 </script>
 
