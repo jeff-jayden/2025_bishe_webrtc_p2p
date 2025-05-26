@@ -698,13 +698,11 @@ function sendData() {
   transferQueue.value = [];
 
   // 获取要发送的文件列表 已经发送过的就不用发了
-  const filesToSend = [...localFilesList.value].map((file) => {
-    debugger;
+  const filesToSend = [...localFilesList.value].filter((file) => {
     if (haveTransedFile.value[file.name]?.status !== 'completed') {
       return file;
     }
   });
-
   // 限制初始批次大小，避免一次性发送过多文件
   const initialBatchSize = Math.min(maxParallelTransfers, filesToSend.length);
 
