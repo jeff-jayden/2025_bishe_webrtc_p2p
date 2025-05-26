@@ -119,7 +119,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue';
+import { ref, onMounted, nextTick, watch } from 'vue';
 import {
   UploadOne,
   FileText,
@@ -146,6 +146,9 @@ const currentTransfers = ref({});
 const lastResult = ref();
 const maxTransferData = ref(0);
 const realTimeRate = ref();
+
+const activityTimer = ref(null);
+const ACTIVITY_TIMEOUT = 5 * 60 * 1000; // 10 seconds
 
 // 配置STUN服务器，帮助NAT穿透
 const configuration = ref({
@@ -225,75 +228,169 @@ const selectFile = () => {
   }
 };
 
+function resetActivityTimer() {
+  clearTimeout(activityTimer.value);
+  const isPeerConnected = pc.value && pc.value.connectionState === 'connected';
+  const isSendChannelEffectivelyOpen =
+    sendChannel.value && sendChannel.value.readyState === 'open';
+  const isReceiveChannelEffectivelyOpen =
+    receiveChannel.value && receiveChannel.value.readyState === 'open';
+
+  if (
+    isPeerConnected &&
+    (isSendChannelEffectivelyOpen || isReceiveChannelEffectivelyOpen)
+  ) {
+    console.log('Activity timer reset (5mins)');
+    activityTimer.value = setTimeout(() => {
+      const stillPeerConnected =
+        pc.value && pc.value.connectionState === 'connected';
+      const stillSendOpen =
+        sendChannel.value && sendChannel.value.readyState === 'open';
+      const stillReceiveOpen =
+        receiveChannel.value && receiveChannel.value.readyState === 'open';
+
+      if (stillPeerConnected && (stillSendOpen || stillReceiveOpen)) {
+        ElMessage.warning('5分钟内无数据传输活动，已自动断开连接。');
+        handleDisconnect();
+      } else {
+        console.log(
+          'Activity timer expired, but connection/channels no longer active.'
+        );
+      }
+    }, ACTIVITY_TIMEOUT);
+  } else {
+    // console.log('Activity timer not set: PC not connected or no channels open.');
+  }
+}
+
 const switchFunction = (tab) => {
   activeTab.value = tab;
-
   console.log('切换中...');
-
   nextTick(() => {
-    // 切换标签时重新设置数据通道的事件处理程序
-    // 接收渠道设置
     signaling.value.postMessage({ type: 'ready' });
 
     if (receiveChannel.value) {
       console.log('有receiveChannel');
       console.log('tab', tab);
       if (tab === 'file' && transfileRef.value) {
-        receiveChannel.value.onmessage =
-          transfileRef.value.onReceiveChannelMessageCallback;
-        receiveChannel.value.onopen =
+        const originalOnReceiveOpen =
           transfileRef.value.onReceiveChannelStateChange;
+        receiveChannel.value.onopen = (event) => {
+          resetActivityTimer();
+          if (originalOnReceiveOpen)
+            originalOnReceiveOpen.call(transfileRef.value, event);
+        };
+        const originalOnReceiveMessage =
+          transfileRef.value.onReceiveChannelMessageCallback;
+        receiveChannel.value.onmessage = (event) => {
+          resetActivityTimer();
+          if (originalOnReceiveMessage)
+            originalOnReceiveMessage.call(transfileRef.value, event);
+        };
         receiveChannel.value.onclose =
           transfileRef.value.onReceiveChannelStateChange;
       } else if (tab === 'text' && transtextRef.value) {
         console.log('切换为text');
+        const originalTextReceiveOnOpen =
+          transtextRef.value.onReceiveChannelStateChange; // Placeholder
+        receiveChannel.value.onopen = (event) => {
+          resetActivityTimer();
+          if (originalTextReceiveOnOpen)
+            originalTextReceiveOnOpen.call(transtextRef.value, event);
+          else if (transtextRef.value) transtextRef.value.isConnected = true;
+        };
+        const originalOnTextMsgReceived =
+          transtextRef.value.onTextMessageReceived;
         receiveChannel.value.onmessage = (event) => {
+          resetActivityTimer();
           try {
             const message = JSON.parse(event.data);
-            transtextRef.value.onTextMessageReceived(message);
+            if (originalOnTextMsgReceived)
+              originalOnTextMsgReceived.call(transtextRef.value, message);
           } catch (error) {
             console.error('解析消息失败:', error);
           }
         };
+        const originalTextReceiveOnClose =
+          transtextRef.value.onReceiveChannelStateChange; // Placeholder
+        receiveChannel.value.onclose = (event) => {
+          if (originalTextReceiveOnClose)
+            originalTextReceiveOnClose.call(transtextRef.value, event);
+          else if (transtextRef.value) transtextRef.value.isConnected = false;
+        };
       }
     }
 
-    // 发送渠道设置
     if (sendChannel.value) {
       console.log('有sendChannel');
       console.log('tab', tab);
-
       if (tab === 'file' && transfileRef.value) {
-        sendChannel.value.onopen = transfileRef.value.onSendChannelStateChange;
-        sendChannel.value.onmessage =
+        const originalOnSendOpen = transfileRef.value.onSendChannelStateChange;
+        sendChannel.value.onopen = (event) => {
+          resetActivityTimer();
+          if (originalOnSendOpen)
+            originalOnSendOpen.call(transfileRef.value, event);
+        };
+        const originalOnSendMessage =
           transfileRef.value.onSendChannelMessageCallback;
+        sendChannel.value.onmessage = (event) => {
+          // For control messages received by sender
+          resetActivityTimer();
+          if (originalOnSendMessage)
+            originalOnSendMessage.call(transfileRef.value, event);
+        };
         sendChannel.value.onclose = transfileRef.value.onSendChannelStateChange;
       } else if (tab === 'text' && transtextRef.value) {
         console.log('切换为text');
-
+        const originalTextSendOnOpen =
+          transtextRef.value.onSendChannelStateChange; // Placeholder
+        sendChannel.value.onopen = (event) => {
+          resetActivityTimer();
+          if (originalTextSendOnOpen)
+            originalTextSendOnOpen.call(transtextRef.value, event);
+          else if (transtextRef.value) transtextRef.value.isConnected = true;
+        };
+        // Assuming text component might also listen to messages on sendChannel (e.g. self-acks)
+        const originalTextSendOnMessage =
+          transtextRef.value.onTextMessageReceived; // Or a specific handler
         sendChannel.value.onmessage = (event) => {
+          resetActivityTimer();
           try {
             const message = JSON.parse(event.data);
-            transtextRef.value.onTextMessageReceived(message);
+            if (originalTextSendOnMessage)
+              originalTextSendOnMessage.call(transtextRef.value, message);
           } catch (error) {
             console.error('解析消息失败:', error);
           }
+        };
+        const originalTextSendOnClose =
+          transtextRef.value.onSendChannelStateChange; // Placeholder
+        sendChannel.value.onclose = (event) => {
+          if (originalTextSendOnClose)
+            originalTextSendOnClose.call(transtextRef.value, event);
+          else if (transtextRef.value) transtextRef.value.isConnected = false;
         };
       }
     }
   });
 };
 
-const discInner = (channel, shenfen) => {
+const closeChannel = (channel) => {
+  clearTimeout(activityTimer.value); // Clear timer when a channel is manually closed
   channel.close();
   channel = null;
   transfileRef.value.con_status = false;
   transfileRef.value.isSelf = true;
+};
+
+const discInner = (channel, shenfen) => {
+  closeChannel(channel);
   signaling.value.postMessage({ type: 'disconncted', shenfen });
 };
 
 // 处理主动断开连接的函数
 const handleDisconnect = () => {
+  clearTimeout(activityTimer.value);
   console.log('Attempting to disconnect...');
   // 当是sendChannel方主动断开连接，先断开自己的，再发个消息给对方，对方也断开
   if (sendChannel.value) {
@@ -508,47 +605,104 @@ function receiveChannelCallback(event) {
 
   // 通道事件处理将在组件中设置
   if (activeTab.value === 'file' && transfileRef.value) {
-    receiveChannel.value.onmessage =
-      transfileRef.value.onReceiveChannelMessageCallback;
-    receiveChannel.value.onopen =
+    const originalOnReceiveOpen =
       transfileRef.value.onReceiveChannelStateChange;
+    receiveChannel.value.onopen = (e) => {
+      resetActivityTimer();
+      if (originalOnReceiveOpen)
+        originalOnReceiveOpen.call(transfileRef.value, e);
+    };
+    const originalOnReceiveMessage =
+      transfileRef.value.onReceiveChannelMessageCallback;
+    receiveChannel.value.onmessage = (e) => {
+      resetActivityTimer();
+      if (originalOnReceiveMessage)
+        originalOnReceiveMessage.call(transfileRef.value, e);
+    };
     receiveChannel.value.onclose =
       transfileRef.value.onReceiveChannelStateChange;
   } else if (activeTab.value === 'text' && transtextRef.value) {
-    receiveChannel.value.onmessage = (event) => {
+    const originalTextReceiveOnOpen =
+      transtextRef.value.onReceiveChannelStateChange; // Placeholder
+    receiveChannel.value.onopen = (e) => {
+      resetActivityTimer();
+      if (originalTextReceiveOnOpen)
+        originalTextReceiveOnOpen.call(transtextRef.value, e);
+      else if (transtextRef.value) transtextRef.value.isConnected = true;
+    };
+    const originalOnTextMsgReceived = transtextRef.value.onTextMessageReceived;
+    receiveChannel.value.onmessage = (e) => {
+      resetActivityTimer();
       try {
-        const message = JSON.parse(event.data);
-        console.log('receiveChannel 执行', message);
-        transtextRef.value.onTextMessageReceived(message);
+        const message = JSON.parse(e.data);
+        if (originalOnTextMsgReceived)
+          originalOnTextMsgReceived.call(transtextRef.value, message);
       } catch (error) {
         console.error('解析消息失败:', error);
       }
     };
+    const originalTextReceiveOnClose =
+      transtextRef.value.onReceiveChannelStateChange; // Placeholder
+    receiveChannel.value.onclose = (e) => {
+      if (originalTextReceiveOnClose)
+        originalTextReceiveOnClose.call(transtextRef.value, e);
+      else if (transtextRef.value) transtextRef.value.isConnected = false;
+    };
   }
 }
 
-// 开始创建连接入口  发送方
 const startFn = async () => {
   console.log('startFn-----');
-  // 创建 p2p 连接对象
   await createPeerConnection();
-  // 创建数据通道
   sendChannel.value = pc.value.createDataChannel('sendDataChannel');
 
-  // 通道事件处理将在组件中设置
+  const originalSend = sendChannel.value.send.bind(sendChannel.value);
+  sendChannel.value.send = (...args) => {
+    if (sendChannel.value && sendChannel.value.readyState === 'open') {
+      resetActivityTimer();
+    }
+    return originalSend(...args);
+  };
+
   if (activeTab.value === 'file' && transfileRef.value) {
-    sendChannel.value.onopen = transfileRef.value.onSendChannelStateChange;
-    sendChannel.value.onmessage =
+    const originalOnSendOpen = transfileRef.value.onSendChannelStateChange;
+    sendChannel.value.onopen = (event) => {
+      resetActivityTimer();
+      if (originalOnSendOpen)
+        originalOnSendOpen.call(transfileRef.value, event);
+    };
+    const originalOnSendMessage =
       transfileRef.value.onSendChannelMessageCallback;
+    sendChannel.value.onmessage = (event) => {
+      resetActivityTimer();
+      if (originalOnSendMessage)
+        originalOnSendMessage.call(transfileRef.value, event);
+    };
     sendChannel.value.onclose = transfileRef.value.onSendChannelStateChange;
   } else if (activeTab.value === 'text' && transtextRef.value) {
+    const originalTextSendOnOpen = transtextRef.value.onSendChannelStateChange; // Placeholder
+    sendChannel.value.onopen = (event) => {
+      resetActivityTimer();
+      if (originalTextSendOnOpen)
+        originalTextSendOnOpen.call(transtextRef.value, event);
+      else if (transtextRef.value) transtextRef.value.isConnected = true;
+    };
+    const originalTextSendOnMessage = transtextRef.value.onTextMessageReceived; // Or specific handler
     sendChannel.value.onmessage = (event) => {
+      resetActivityTimer();
       try {
         const message = JSON.parse(event.data);
-        transtextRef.value.onTextMessageReceived(message);
+        if (originalTextSendOnMessage)
+          originalTextSendOnMessage.call(transtextRef.value, message);
       } catch (error) {
         console.error('解析消息失败:', error);
       }
+    };
+    const originalTextSendOnClose = transtextRef.value.onSendChannelStateChange; // Placeholder
+    sendChannel.value.onclose = (event) => {
+      if (originalTextSendOnClose)
+        originalTextSendOnClose.call(transtextRef.value, event);
+      else if (transtextRef.value) transtextRef.value.isConnected = false;
     };
   }
 

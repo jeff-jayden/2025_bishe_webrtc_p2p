@@ -142,7 +142,7 @@
       <!-- 拖放区域 -->
       <div class="drop-area" @click="selectFile">
         <div class="drop-content">
-          <p>点击添加文件或将文件（夹）拖放到这里（单次可发10个文件）</p>
+          <p>点击添加文件或将文件（夹）拖放到这里（单次可发8个文件）</p>
         </div>
       </div>
       <div class="bottom-area">
@@ -171,8 +171,8 @@ import { encryptData, decryptData } from '@/utils/crypto';
 
 // 获取URL对象，用于创建文件下载链接
 const URL = window.URL || window.webkitURL;
-const ALIST_DONMAIN = 'http://192.168.1.10:5244';
-const MINIO_DONMAIN = 'http://192.168.1.10:9000';
+const ALIST_DONMAIN = 'http://192.168.31.201:5244';
+const MINIO_DONMAIN = 'http://192.168.31.201:9000';
 
 const con_status = ref(false);
 // 存放的是单独的要发送的完整文件
@@ -181,7 +181,7 @@ const transferQueue = ref([]);
 const message = ref();
 const fileReaders = ref({});
 const localFilesList = ref([]);
-const maxParallelTransfers = 10; // 最大并行传输数量
+const maxParallelTransfers = 8; // 最大并行传输数量
 const haveTransedFile = ref({});
 const haveRecievedFile = ref({});
 const alistToken = ref('');
@@ -547,7 +547,7 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
   // ???
   props.currentTransfers[transferId] = info;
 
-  const chunkSize = 191488; // 187KB
+  const chunkSize = 131072; // 187KB
   // 每次发送一个完整都会重置
   fileReaders.value[transferId] = new FileReader();
   let offset = 0;
@@ -698,7 +698,12 @@ function sendData() {
   transferQueue.value = [];
 
   // 获取要发送的文件列表 已经发送过的就不用发了
-  const filesToSend = [...localFilesList.value];
+  const filesToSend = [...localFilesList.value].map((file) => {
+    debugger;
+    if (haveTransedFile.value[file.name]?.status !== 'completed') {
+      return file;
+    }
+  });
 
   // 限制初始批次大小，避免一次性发送过多文件
   const initialBatchSize = Math.min(maxParallelTransfers, filesToSend.length);
@@ -791,6 +796,7 @@ const handleListFile = async (items, isDrag = false) => {
               size: file.size,
               type: file.type,
               file: file, // 保存文件对象本身，以便后续发送
+              fileName: file.name,
               date: new Date().toLocaleString(),
               progress: 0, // 初始化进度为0
               uploadedSize: 0, // 初始化已上传大小为0
