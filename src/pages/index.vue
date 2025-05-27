@@ -148,7 +148,7 @@ const maxTransferData = ref(0);
 const realTimeRate = ref();
 
 const activityTimer = ref(null);
-const ACTIVITY_TIMEOUT = 5 * 60 * 1000; // 10 seconds
+const ACTIVITY_TIMEOUT = 2 * 60 * 1000; // 10 seconds
 
 // 配置STUN服务器，帮助NAT穿透
 const configuration = ref({
@@ -488,7 +488,7 @@ async function createPeerConnection() {
       // 保存当前统计结果供下次计算使用
       lastResult.value = stats;
       // 将统计输出显示在页面上 (如果 statsbox 存在)
-      transfileRef.value.statsbox.innerHTML = statsOutput;
+      // transfileRef.value?.statsbox.innerHTML = statsOutput;
     });
   }, 1000); // 每1000毫秒（1秒）执行一次
 
