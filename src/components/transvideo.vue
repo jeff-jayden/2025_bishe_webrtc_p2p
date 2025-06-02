@@ -21,28 +21,26 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 
-const props = defineProps({
-  signaling: Object,
-});
+const props = defineProps<{ signaling: any }>();
 
 // 视频元素引用
-const localVideo = ref(null);
-const remoteVideo = ref(null);
-const stream = ref();
+const localVideo = ref<HTMLVideoElement | null>(null);
+const remoteVideo = ref<HTMLVideoElement | null>(null);
+const stream = ref<MediaStream | null>();
 // 状态变量
-const localStream = ref(null);
-const isCallActive = ref(false);
+const localStream = ref<MediaStream | null>(null);
+const isCallActive = ref<boolean>(false);
 
 /**
  * 就是一开始是连接好的，现在获取本地媒体流，然后在重新连接一次
  */
 
 // 获取本地媒体流
-const getLocalStream = async () => {
+const getLocalStream = async (): Promise<MediaStream | undefined> => {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: true,
@@ -50,7 +48,9 @@ const getLocalStream = async () => {
     });
 
     localStream.value = stream;
-    localVideo.value.srcObject = stream;
+    if (localVideo.value) {
+      localVideo.value.srcObject = stream;
+    }
     return stream;
   } catch (error) {
     console.error('获取本地媒体流失败:', error);
@@ -60,7 +60,7 @@ const getLocalStream = async () => {
 };
 
 // 开始视频通话
-const startVideoCall = async () => {
+const startVideoCall = async (): Promise<void> => {
   // 获取本地媒体流
   stream.value = await getLocalStream();
   props.signaling.postMessage({ type: 'ready' });
@@ -68,7 +68,7 @@ const startVideoCall = async () => {
 };
 
 // 结束视频通话
-const endVideoCall = () => {
+const endVideoCall = (): void => {
   if (isCallActive.value) {
     // 让signaling发送消息把远端停止
     props.signaling.postMessage({ type: 'bye' });
@@ -77,7 +77,9 @@ const endVideoCall = () => {
 
     // 清除远程视频
     if (remoteVideo.value && remoteVideo.value.srcObject) {
-      remoteVideo.value.srcObject.getTracks().forEach((track) => track.stop());
+      (remoteVideo.value.srcObject as MediaStream)
+        .getTracks()
+        .forEach((track) => track.stop());
       remoteVideo.value.srcObject = null;
     }
 
@@ -87,7 +89,7 @@ const endVideoCall = () => {
 };
 
 // 停止本地媒体流
-const stopLocalStream = () => {
+const stopLocalStream = (): void => {
   if (localStream.value) {
     localStream.value.getTracks().forEach((track) => track.stop());
     localStream.value = null;
@@ -101,7 +103,7 @@ const stopLocalStream = () => {
 defineExpose({
   remoteVideo,
   stream,
-  endVideoCall
+  endVideoCall,
 });
 </script>
 

@@ -1,8 +1,8 @@
-import { createMemoryHistory, createRouter } from 'vue-router';
+import { createMemoryHistory, createRouter, RouteRecordRaw } from 'vue-router';
 
 import Index from '@/pages/index.vue';
 
-const routes = [
+const routes: Array<RouteRecordRaw> = [
   { path: '/', redirect: { name: 'index' } },
   { path: '/home', name: 'index', component: Index },
 ];

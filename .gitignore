@@ -10,12 +10,13 @@ lerna-debug.log*
 docs
 docs-html
 img.png
-mermaid-docs.config
 node_modules
 dist
 dist-ssr
 *.local
 coverage
+mcp
+server
 
 # Editor directories and files
 .vscode/*

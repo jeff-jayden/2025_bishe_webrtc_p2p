@@ -61,20 +61,22 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue';
 import { ElMessage } from 'element-plus';
 
-const props = defineProps({
-  sendChannel: Object,
-  receiveChannel: Object,
-});
+const props = defineProps<{
+  sendChannel: RTCDataChannel | null;
+  receiveChannel: RTCDataChannel | null;
+}>();
 
-const textContent = ref('');
-const receivedTexts = ref([]);
+const textContent = ref<string>('');
+const receivedTexts = ref<
+  Array<{ content: string; time: string; isSelf: boolean }>
+>([]);
 
 // 发送文本
-const sendText = () => {
+const sendText = (): void => {
   if (!textContent.value.trim()) return;
 
   if (props.sendChannel && props.sendChannel.readyState === 'open') {
@@ -124,12 +126,12 @@ const sendText = () => {
 };
 
 // 清空文本
-const clearText = () => {
+const clearText = (): void => {
   textContent.value = '';
 };
 
 // 复制文本到剪贴板
-const copyText = (text) => {
+const copyText = (text: string): void => {
   navigator.clipboard
     .writeText(text)
     .then(() => {
@@ -142,7 +144,11 @@ const copyText = (text) => {
 };
 
 // 接收文本消息的处理函数
-const onTextMessageReceived = (message) => {
+const onTextMessageReceived = (message: {
+  type: string;
+  content: string;
+  time?: string;
+}): void => {
   if (message.type === 'text') {
     receivedTexts.value.unshift({
       content: message.content,

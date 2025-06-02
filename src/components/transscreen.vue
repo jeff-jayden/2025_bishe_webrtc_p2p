@@ -15,24 +15,19 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue';
 
 /**
  * 流程大致，点击共享屏幕，收集媒体流，发送消息，创建连接，同时设置 video
- * 别急慢慢来，先实现了再说
  */
 
-const props = defineProps({
-  signaling: Object,
-  pc: Object,
-});
+const props = defineProps<{ signaling: Object; pc: Object }>();
+const localVideo = ref<HTMLVideoElement | null>(null);
+const remoteVideo = ref<HTMLVideoElement | null>(null);
+const stream = ref<MediaStream | null>(null);
 
-const localVideo = ref(null);
-const remoteVideo = ref(null);
-const stream = ref(null);
-
-const startScreenShare = async () => {
+const startScreenShare = async (): Promise<void> => {
   try {
     stream.value = await navigator.mediaDevices.getDisplayMedia({
       video: true,
@@ -45,7 +40,7 @@ const startScreenShare = async () => {
   }
 };
 
-const stopScreenShare = () => {
+const stopScreenShare = (): void => {
   props.signaling.postMessage({ type: 'bye' });
 
   if (stream.value) {
@@ -65,7 +60,7 @@ defineExpose({
   stream,
   localVideo,
   remoteVideo,
-  stopScreenShare
+  stopScreenShare,
 });
 
 onUnmounted(() => {

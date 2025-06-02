@@ -162,9 +162,31 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { CloseOne, Dot, Download } from '@icon-park/vue-next';
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, type Ref } from 'vue';
+
+// Define interfaces for props and refs
+interface FileTransferStatus {
+  status:
+    | 'pending'
+    | 'transferring'
+    | 'completed'
+    | 'cancelled'
+    | 'failed'
+    | string; // Added string for flexibility if other statuses exist
+  progress: number;
+}
+
+interface ReceivedFileListItem {
+  name: string;
+  fileInfo: { size: number; type: string };
+  receivedFile?: File | Blob; // Can be File or Blob
+  // Add other properties if they exist in receivedFileList items
+}
+
+interface FileReaderItem extends FileReader {}
+
 import { encode } from 'js-base64';
 import { ElMessage } from 'element-plus';
 import { encryptData, decryptData } from '@/utils/crypto';
@@ -174,20 +196,33 @@ const URL = window.URL || window.webkitURL;
 const ALIST_DONMAIN = 'http://192.168.31.201:5244';
 const MINIO_DONMAIN = 'http://192.168.31.201:9000';
 
-const con_status = ref(false);
+const con_status: Ref<boolean> = ref(false);
 // 存放的是单独的要发送的完整文件
-const transferQueue = ref([]);
+const transferQueue: Ref<File[]> = ref([]);
 // 用于存放当前分块的信息
-const message = ref();
-const fileReaders = ref({});
-const localFilesList = ref([]);
+const message: Ref<any> = ref(); // To be refined later if possible
+const fileReaders: Ref<Record<string, FileReaderItem>> = ref({});
+const localFilesList: Ref<File[]> = ref([]);
 const maxParallelTransfers = 8; // 最大并行传输数量
-const haveTransedFile = ref({});
-const haveRecievedFile = ref({});
-const alistToken = ref('');
-const statsbox = ref();
-const bitrateCanvas = ref();
+const haveTransedFile: Ref<Record<string, FileTransferStatus>> = ref({});
+const haveRecievedFile: Ref<Record<string, FileTransferStatus>> = ref({});
+const alistToken: Ref<string> = ref('');
+const statsbox: Ref<HTMLElement | null> = ref(null);
+const bitrateCanvas: Ref<HTMLCanvasElement | null> = ref(null);
 
+const props = defineProps<{
+  receivedFileList: ReceivedFileListItem[];
+  sendChannel: RTCDataChannel | null;
+  receiveChannel: RTCDataChannel | null;
+  currentTransfers: Record<string, any>; // To be refined if structure is known
+  receivedFileChunks: Record<string, ArrayBuffer[]>;
+  receivedFileSizes: Record<string, number>;
+  maxTransferData: number;
+  realTimeRate: number;
+}>();
+
+// Original props definition commented out for reference
+/*
 const props = defineProps({
   receivedFileList: Array,
   sendChannel: Object,
@@ -198,8 +233,9 @@ const props = defineProps({
   maxTransferData: Number,
   realTimeRate: Number,
 });
+*/
 
-const getFileList = () => {
+const getFileList = (): void => {
   var myHeaders = new Headers();
   myHeaders.append('Authorization', alistToken.value);
   myHeaders.append('Content-Type', 'application/json');
@@ -212,7 +248,7 @@ const getFileList = () => {
     refresh: false,
   });
 
-  var requestOptions = {
+  var requestOptions: RequestInit = {
     method: 'POST',
     headers: myHeaders,
     body: raw,
@@ -220,22 +256,22 @@ const getFileList = () => {
   };
 
   fetch(`${ALIST_DONMAIN}/api/fs/list`, requestOptions)
-    .then((response) => response.text())
-    .then((result) => console.log(result))
-    .catch((error) => console.log('error', error));
+    .then((response: Response) => response.text())
+    .then((result: string) => console.log(result))
+    .catch((error: any) => console.log('error', error));
 };
 
-const getMyInfo = () => {
+const getMyInfo = (): void => {
   var myHeaders = new Headers();
   myHeaders.append('Authorization', alistToken.value);
-  fetch(`${ALIST_DONMAIN}/api/me`, myHeaders)
-    .then((response) => response.text())
-    .then((result) => console.log(result))
-    .catch((error) => console.log('error', error));
+  fetch(`${ALIST_DONMAIN}/api/me`, { headers: myHeaders })
+    .then((response: Response) => response.text())
+    .then((result: string) => console.log(result))
+    .catch((error: any) => console.log('error', error));
 };
 
 // 获取 AList 的认证 token
-const getAlistToken = async () => {
+const getAlistToken = async (): Promise<void> => {
   // 创建一个新的 Headers 对象，用于设置请求头
   var myHeaders = new Headers();
   // 设置 Content-Type 请求头为 application/json，表示请求体是 JSON 格式
@@ -248,7 +284,7 @@ const getAlistToken = async () => {
   });
 
   // 构建请求选项对象
-  var requestOptions = {
+  var requestOptions: RequestInit = {
     method: 'POST', // 请求方法为 POST
     headers: myHeaders, // 设置请求头
     body: raw, // 设置请求体
@@ -258,20 +294,24 @@ const getAlistToken = async () => {
   // 发起 fetch 请求到 AList 的登录 API
   fetch(`${ALIST_DONMAIN}/api/auth/login`, requestOptions)
     // 处理响应，将其转换为文本
-    .then((response) => response.text())
+    .then((response: Response) => response.text())
     // 处理文本结果，解析 JSON 并提取 token
-    .then((result) => {
+    .then((resultString: string) => {
+      let result = JSON.parse(resultString);
       result = JSON.parse(result);
       console.log('getAlistToken', result);
       // 将获取到的 token 赋值给 alistToken 的 ref
       alistToken.value = result.data.token;
     })
     // 捕获并处理请求过程中发生的错误
-    .catch((error) => console.log('error', error));
+    .catch((error: any) => console.log('error', error));
 };
 
 // 定义处理上传文件到 AList 的函数，接收文件信息和文件数据
-const handleUpload2Alist = (fileInfo, data) => {
+const handleUpload2Alist = (
+  fileInfo: { name: string; type: string },
+  data: ArrayBuffer
+): void => {
   // 创建一个新的 Headers 对象，用于设置请求头
   var myHeaders = new Headers();
   // 添加 Authorization 请求头，使用 alistToken 进行认证
@@ -289,7 +329,7 @@ const handleUpload2Alist = (fileInfo, data) => {
   const file = new File([data], fileInfo.name, { type: fileInfo.type });
 
   // 构建请求选项对象
-  var requestOptions = {
+  var requestOptions: RequestInit = {
     method: 'PUT', // 请求方法为 PUT，用于上传文件
     headers: myHeaders, // 设置请求头
     body: file, // 设置请求体为文件数据
@@ -302,14 +342,14 @@ const handleUpload2Alist = (fileInfo, data) => {
   // 发起 fetch 请求到 AList 的文件上传 API
   fetch(`${ALIST_DONMAIN}/api/fs/put`, requestOptions)
     // 处理响应，将其转换为文本
-    .then((response) => response.text())
+    .then((response: Response) => response.text())
     // 处理文本结果，打印上传结果（用于调试）
     .then((result) => console.log('fsresult', result))
     // 捕获并处理请求过程中发生的错误
-    .catch((error) => console.log('error', error));
+    .catch((error: any) => console.log('error', error));
 };
 
-const handlePreview = (fileName) => {
+const handlePreview = (fileName: string): void => {
   // 构建要预览文件的完整访问 URL，这里使用了 MINIO_DONMAIN 和文件路径
   var url = `${MINIO_DONMAIN}/miniodemo/root/${fileName}`; //要预览文件的访问地址
   // 打开一个新的浏览器窗口或标签页来在线预览文件
@@ -320,21 +360,33 @@ const handlePreview = (fileName) => {
 };
 
 // 接收文件处理函数
-async function onReceiveChannelMessageCallback(event) {
+async function onReceiveChannelMessageCallback(
+  event: MessageEvent
+): Promise<void> {
   console.log('Received Message');
 
-  let data = event.data;
+  let data: any = event.data; // Consider more specific type if possible
 
   if (typeof data === 'string' && data.startsWith('{')) {
     try {
       message.value = JSON.parse(data);
 
       // 这是一个数据块的元信息，下一个消息将是实际数据
-      const { transferId, offset, size, fileInfo } = message.value;
-      const { name } = fileInfo;
+      const {
+        transferId,
+        offset,
+        size,
+        fileInfo,
+      }: {
+        transferId: string;
+        offset: number;
+        size: number;
+        fileInfo: { name: string; type: string; size: number };
+      } = message.value;
+      const { name }: { name: string } = fileInfo;
       if (!haveRecievedFile.value[transferId]) {
         // 保存已收到文件信息
-        const receiveFileInfo = {
+        const receiveFileInfo: FileTransferStatus = {
           currentChunkOffset: offset || 0,
           currentChunkSize: size,
           status: 'receiving',
@@ -355,7 +407,9 @@ async function onReceiveChannelMessageCallback(event) {
 
   // 二进制数据块
   // 查找当前正在接收的传输文件名
-  const activeTransferId = Object.keys(haveRecievedFile.value).find(
+  const activeTransferId: string | undefined = Object.keys(
+    haveRecievedFile.value
+  ).find(
     (id) =>
       haveRecievedFile.value[id].status === 'receiving' &&
       id === message.value.transferId
@@ -411,7 +465,7 @@ async function onReceiveChannelMessageCallback(event) {
 }
 
 // 发送通道消息处理函数
-function onSendChannelMessageCallback(event) {
+function onSendChannelMessageCallback(event: MessageEvent): void {
   // 使用相同的处理逻辑处理发送通道上的消息
   onReceiveChannelMessageCallback(event);
 }
@@ -420,7 +474,7 @@ function onSendChannelMessageCallback(event) {
 const isSelf = ref(false);
 
 // 发送通道状态变化处理函数
-function onSendChannelStateChange() {
+function onSendChannelStateChange(): void {
   if (!props.sendChannel) return;
 
   const readyState = props.sendChannel.readyState;
@@ -457,7 +511,7 @@ function onSendChannelStateChange() {
 }
 
 // 接收通道状态变化处理函数
-function onReceiveChannelStateChange() {
+function onReceiveChannelStateChange(): void {
   if (!props.receiveChannel) return;
 
   const readyState = props.receiveChannel.readyState;
@@ -491,13 +545,13 @@ function onReceiveChannelStateChange() {
   }
 }
 
-const stopSendData = () => {
+const stopSendData = (): void => {
   if (sendData.length) sendQueue = [];
   transferQueue.value = [];
 };
 
 // 处理取消传输的函数
-const handleCancelTransfer = (fileName) => {
+const handleCancelTransfer = (fileName: string): void => {
   console.log(`Cancelling transfer for file: ${fileName}`);
   // 查找对应的 FileReader
   const fileReader = fileReaders.value[fileName];
@@ -526,7 +580,12 @@ const handleCancelTransfer = (fileName) => {
   // TODO: Optionally send a cancellation message to the peer
 };
 
-const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
+const handleSendFn = async (
+  channel: RTCDataChannel | null,
+  fileInfo: { name: string; type: string; size: number },
+  data: File,
+  uploadedSize: number = 0
+): Promise<void> => {
   // 生成唯一的传输ID
   const transferId = `${fileInfo.name}`;
 
@@ -534,7 +593,7 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
   console.log('channel', channel);
 
   // 记录当前传输
-  const info = {
+  const info: FileTransferStatus = {
     id: transferId,
     file: data,
     progress: 0,
@@ -556,13 +615,13 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
   let sendingInProgress = false;
 
   // 创建文件碎片发送队列
-  let sendQueue = [];
+  let sendQueue: (string | ArrayBuffer)[] = [];
 
   // 设置缓冲区阈值
   channel.bufferedAmountLowThreshold = 113246208; // 12MB
 
   // 处理发送队列的函数
-  const processSendQueue = () => {
+  const processSendQueue = (): void => {
     // 如果正在发送或者发送完结 结束发送逻辑
     if (sendingInProgress || sendQueue.length === 0) {
       return;
@@ -580,7 +639,7 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
     }
 
     sendingInProgress = true;
-    const item = sendQueue.shift();
+    const item: string | ArrayBuffer | undefined = sendQueue.shift();
 
     try {
       // 发送文件
@@ -605,7 +664,7 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
   channel.onbufferedamountlow = processSendQueue;
 
   // 添加数据到发送队列
-  const queueDataForSend = (data) => {
+  const queueDataForSend = (data: string | ArrayBuffer): void => {
     sendQueue.push(data);
     // Start processing the queue if not already in progress
     if (!sendingInProgress) {
@@ -613,66 +672,69 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
     }
   };
 
-  fileReaders.value[transferId].addEventListener('error', (error) =>
+  fileReaders.value[transferId].addEventListener('error', (error: Event) =>
     console.error(`Error reading file ${transferId}:`, error)
   );
 
-  fileReaders.value[transferId].addEventListener('abort', (event) =>
+  fileReaders.value[transferId].addEventListener('abort', (event: Event) =>
     console.log(`File reading aborted ${transferId}:`, event)
   );
 
-  fileReaders.value[transferId].addEventListener('load', async (e) => {
-    if (!con_status.value) return;
+  fileReaders.value[transferId].addEventListener(
+    'load',
+    async (e: ProgressEvent<FileReader>) => {
+      if (!con_status.value) return;
 
-    // 应该在发送前将offset设置
-    offset += e.target.result.byteLength;
+      // 应该在发送前将offset设置
+      offset += (e.target?.result as ArrayBuffer).byteLength;
 
-    // 准备元数据
-    const chunkInfo = JSON.stringify({
-      type: 'chunk-info',
-      transferId: transferId,
-      offset: offset,
-      size: e.target.result.byteLength,
-      fileInfo,
-    });
+      // 准备元数据
+      const chunkInfo = JSON.stringify({
+        type: 'chunk-info',
+        transferId: transferId,
+        offset: offset,
+        size: (e.target?.result as ArrayBuffer).byteLength,
+        fileInfo,
+      });
 
-    // 加密数据块 webrtc自带文件加密 使用 DTLS握手阶段的加密算法 SRTP数据传输阶段的加密算法
-    const encryptedChunk = await encryptData(e.target.result);
+      // 加密数据块 webrtc自带文件加密 使用 DTLS握手阶段的加密算法 SRTP数据传输阶段的加密算法
+      const encryptedChunk = await encryptData(e.target?.result as ArrayBuffer);
 
-    // 将元数据和实际数据添加到发送队列
-    queueDataForSend(chunkInfo);
-    queueDataForSend(encryptedChunk);
+      // 将元数据和实际数据添加到发送队列
+      queueDataForSend(chunkInfo);
+      queueDataForSend(encryptedChunk);
 
-    // 更新进度
-    haveTransedFile.value[transferId].progress = Math.floor(
-      (offset / data.size) * 100
-    );
-    haveTransedFile.value[transferId].uploadedSize = offset;
+      // 更新进度
+      haveTransedFile.value[transferId].progress = Math.floor(
+        (offset / data.size) * 100
+      );
+      haveTransedFile.value[transferId].uploadedSize = offset;
 
-    if (offset < data.size) {
-      // Read the next slice immediately after the current one is loaded
-      readSlice(offset);
-      return;
+      if (offset < data.size) {
+        // Read the next slice immediately after the current one is loaded
+        readSlice(offset);
+        return;
+      }
+      // 如果分片小于设置的分片大小，此时就回直接走这里，都没发送  不对只要加载完成就回放到对列发送
+
+      // 传输完成
+      console.log('传输完成');
+
+      // 传输完成，上传至alist
+      handleUpload2Alist(fileInfo, data);
+      haveTransedFile.value[transferId].status = 'completed';
+
+      setTimeout(() => {
+        delete fileReaders.value[transferId];
+        delete props.currentTransfers[transferId];
+
+        // 检查队列中是否有等待的文件
+        processNextInQueue();
+      }, 100);
     }
-    // 如果分片小于设置的分片大小，此时就回直接走这里，都没发送  不对只要加载完成就回放到对列发送
+  );
 
-    // 传输完成
-    console.log('传输完成');
-
-    // 传输完成，上传至alist
-    handleUpload2Alist(fileInfo, data);
-    haveTransedFile.value[transferId].status = 'completed';
-
-    setTimeout(() => {
-      delete fileReaders.value[transferId];
-      delete props.currentTransfers[transferId];
-
-      // 检查队列中是否有等待的文件
-      processNextInQueue();
-    }, 100);
-  });
-
-  const readSlice = (o) => {
+  const readSlice = (o: number): void => {
     const slice = data.slice(offset, o + chunkSize);
     fileReaders.value[transferId].readAsArrayBuffer(slice);
   };
@@ -686,7 +748,7 @@ const handleSendFn = async (channel, fileInfo, data, uploadedSize = 0) => {
  * 情况，可以也搞一个缓存队列，搞个缓存区去判断执行是不是要发送碎片
  */
 // 处理发送文件功能
-function sendData() {
+function sendData(): void {
   // 传输前检查通道状态
   const channel = props.sendChannel ? props.sendChannel : props.receiveChannel;
   if (!channel || channel.readyState !== 'open') {
@@ -698,7 +760,7 @@ function sendData() {
   transferQueue.value = [];
 
   // 获取要发送的文件列表 已经发送过的就不用发了
-  const filesToSend = [...localFilesList.value].filter((file) => {
+  const filesToSend: File[] = [...localFilesList.value].filter((file: File) => {
     if (haveTransedFile.value[file.name]?.status !== 'completed') {
       return file;
     }
@@ -708,10 +770,10 @@ function sendData() {
 
   // 先发送初始批次
   for (let i = 0; i < initialBatchSize; i++) {
-    const item = filesToSend[i];
-    const data = item.file;
+    const item: any = filesToSend[i]; // Consider a more specific type if possible
+    const data: File = item.file;
     const uploadedSize = item.uploadedSize || 0; // 获取已上传大小
-    const fileInfo = {
+    const fileInfo: { name: string; size: number; type: string; data: File } = {
       name: item.name,
       size: item.size,
       type: item.type,
@@ -724,18 +786,18 @@ function sendData() {
 
   // 将剩余文件添加到队列
   for (let i = initialBatchSize; i < filesToSend.length; i++) {
-    const item = filesToSend[i];
+    const item: any = filesToSend[i]; // Consider a more specific type if possible
     transferQueue.value.push({
       channel,
       fileInfo: {
         name: item.name,
         size: item.size,
         type: item.type,
-        data: item.file,
+        data: item.file as File, // Type assertion
       },
-      data: item.file,
-      uploadedSize: item.uploadedSize || 0, // 保存已上传大小到队列
-    });
+      data: item.file as File, // Type assertion
+      uploadedSize: item.uploadedSize || 0,
+    } as any); // Consider defining a specific type for queue items
   }
 
   // 显示队列状态 提示下
@@ -756,7 +818,7 @@ const processNextInQueue = () => {
     transferQueue.value.length > 0 &&
     activeTransfers < maxParallelTransfers
   ) {
-    const nextTransfer = transferQueue.value.shift();
+    const nextTransfer: any = transferQueue.value.shift();
 
     if (nextTransfer) {
       const { channel, fileInfo, data, uploadedSize } = nextTransfer;
@@ -767,21 +829,26 @@ const processNextInQueue = () => {
 
 // 处理文件上传逻辑
 // 处理文件上传逻辑
-const getFileName = (filePath) => {
+const getFileName = (filePath: string): string => {
   const parts = filePath.split('/');
   return parts[parts.length - 1];
 };
 
-const handleListFile = async (items, isDrag = false) => {
+const handleListFile = async (
+  items: any[],
+  isDrag: boolean = false
+): Promise<void> => {
+  // Consider a more specific type for items
   if (!items || items.length === 0) return;
 
   // items are already FileSystemEntry objects extracted in handleDrop
   const entriesToProcess = items;
 
-  const processEntry = async (entry, path = '') => {
+  const processEntry = async (entry: any, path: string = ''): Promise<void> => {
+    // Consider a more specific type for entry
     if (entry.isFile) {
       return new Promise((resolve) => {
-        entry.file((file) => {
+        entry.file((file: File) => {
           const relativePath = path ? `${path}/${file.name}` : file.name;
           const idx = localFilesList.value.findIndex(
             (item) => item.name === relativePath
@@ -798,8 +865,7 @@ const handleListFile = async (items, isDrag = false) => {
               date: new Date().toLocaleString(),
               progress: 0, // 初始化进度为0
               uploadedSize: 0, // 初始化已上传大小为0
-            });
-            resolve();
+            } as any); // Consider defining a specific type for localFilesList items
           }
           resolve();
         });
@@ -807,7 +873,8 @@ const handleListFile = async (items, isDrag = false) => {
     } else if (entry.isDirectory) {
       const directoryReader = entry.createReader();
       return new Promise((resolve) => {
-        directoryReader.readEntries(async (entries) => {
+        directoryReader.readEntries(async (entries: any[]) => {
+          // Consider a more specific type for entries
           for (const subEntry of entries) {
             await processEntry(
               subEntry,
@@ -838,12 +905,12 @@ const handleListFile = async (items, isDrag = false) => {
 };
 
 // 拖动文件
-const handleDrop = async (e) => {
+const handleDrop = async (e: DragEvent): Promise<void> => {
   e.preventDefault();
   // 检查是否有文件被拖放
   if (e.dataTransfer && e.dataTransfer.items) {
-    const items = e.dataTransfer.items;
-    const entriesToProcess = [];
+    const items: DataTransferItemList = e.dataTransfer.items;
+    const entriesToProcess: any[] = []; // Consider a more specific type for entries
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -858,15 +925,16 @@ const handleDrop = async (e) => {
 };
 
 // 选择文件
-const selectFile = () => {
+const selectFile = (): void => {
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
   fileInput.multiple = true;
 
-  fileInput.onchange = (e) => {
+  fileInput.onchange = (e: Event) => {
     // 对于文件选择器，直接获取文件列表
     handleListFile(
-      Array.from(e.target.files).map((file) => ({
+      Array.from((e.target as HTMLInputElement).files!).map((file: File) => ({
+        // Added non-null assertion for files
         webkitGetAsEntry: () => ({
           isFile: true,
           name: file.name,
@@ -880,17 +948,17 @@ const selectFile = () => {
 };
 
 // 删除文件
-const handleDeleteFile = (index) => {
+const handleDeleteFile = (index: number): void => {
   localFilesList.value.splice(index, 1);
 };
 
 // 清空文件列表
-const clearFiles = () => {
+const clearFiles = (): void => {
   localFilesList.value = [];
   haveTransedFile.value = {};
 };
 
-const connectAlist = async () => {
+const connectAlist = async (): Promise<void> => {
   await getAlistToken();
   getMyInfo();
   getFileList();
