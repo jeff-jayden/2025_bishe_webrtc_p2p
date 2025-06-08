@@ -62,13 +62,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 
 const props = defineProps<{
   sendChannel: RTCDataChannel | null;
   receiveChannel: RTCDataChannel | null;
 }>();
+
+const emit = defineEmits(['closeChannel']);
 
 const textContent = ref<string>('');
 const receivedTexts = ref<
@@ -158,6 +160,11 @@ const onTextMessageReceived = (message: {
   }
 };
 
+onUnmounted(() => {
+  // 关闭通道
+  emit('closeChannel');
+});
+
 // 暴露方法给父组件
 defineExpose({
   onTextMessageReceived,
@@ -203,6 +210,8 @@ defineExpose({
         border-radius: 8px;
         padding: 6px 8px;
         margin-bottom: 5px;
+        justify-content: space-around;
+        align-items: center;
       }
     }
   }

@@ -22,10 +22,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, onUnmounted } from 'vue';
 import { ElMessage } from 'element-plus';
 
 const props = defineProps<{ signaling: any }>();
+const emit = defineEmits(['closeChannel']);
 
 // 视频元素引用
 const localVideo = ref<HTMLVideoElement | null>(null);
@@ -71,7 +72,7 @@ const startVideoCall = async (): Promise<void> => {
 const endVideoCall = (): void => {
   if (isCallActive.value) {
     // 让signaling发送消息把远端停止
-    props.signaling.postMessage({ type: 'bye' });
+    props.signaling.postMessage({ type: 'endCall' });
     // 停止本地流
     stopLocalStream();
 
@@ -84,7 +85,7 @@ const endVideoCall = (): void => {
     }
 
     isCallActive.value = false;
-    ElMessage.info('视频通话已结束');
+    ElMessage.success('视频通话已结束');
   }
 };
 
@@ -98,6 +99,11 @@ const stopLocalStream = (): void => {
     }
   }
 };
+
+onUnmounted(() => {
+  // 关闭通道
+  emit('closeChannel');
+});
 
 // 暴露方法给父组件
 defineExpose({

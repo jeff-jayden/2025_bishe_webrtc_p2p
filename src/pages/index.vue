@@ -64,7 +64,7 @@
             传视频
           </div>
         </div>
-        <div class="right-nav">
+        <div v-if="activeTab === 'file'" class="right-nav">
           <el-button type="primary" class="nav-button" @click="downloadAllFiles"
             >下载所有</el-button
           >
@@ -96,12 +96,14 @@
         :receivedFileSizes="receivedFileSizes"
         :maxTransferData="maxTransferData"
         :realTimeRate="realTimeRate"
+        @closeChannel="handleDisconnect"
       />
       <Transtext
         v-if="activeTab === 'text'"
         :sendChannel="sendChannel"
         :receiveChannel="receiveChannel"
         ref="transtextRef"
+        @closeChannel="handleDisconnect"
       />
       <Transvideo
         v-if="activeTab === 'video'"
@@ -110,9 +112,9 @@
       />
       <Transscreen
         v-if="activeTab === 'screen'"
-        :signaling="signaling"
         :pc="pc"
         ref="transscreenRef"
+        @endCall="handleEndCall"
       />
     </div>
   </div>
@@ -137,7 +139,7 @@ const MINIO_DONMAIN = 'http://192.168.206.72:9000';
 const receivedFileChunks = ref({});
 const receivedFileSizes = ref({});
 const receivedFileList = ref([]);
-const activeTab = ref('file');
+const activeTab = ref('text');
 const pc = ref();
 const signaling = ref();
 const sendChannel = ref();
@@ -228,6 +230,10 @@ const selectFile = () => {
   }
 };
 
+const handleEndCall = () => {
+  signaling.value.postMessage({ type: 'endCall' });
+};
+
 function resetActivityTimer() {
   clearTimeout(activityTimer.value);
   const isPeerConnected = pc.value && pc.value.connectionState === 'connected';
@@ -273,50 +279,32 @@ const switchFunction = (tab) => {
       console.log('有receiveChannel');
       console.log('tab', tab);
       if (tab === 'file' && transfileRef.value) {
-        const originalOnReceiveOpen =
-          transfileRef.value.onReceiveChannelStateChange;
         receiveChannel.value.onopen = (event) => {
           resetActivityTimer();
-          if (originalOnReceiveOpen)
-            originalOnReceiveOpen.call(transfileRef.value, event);
+          if (transfileRef.value) {
+            transfileRef.value.onReceiveChannelStateChange(event);
+          }
         };
-        const originalOnReceiveMessage =
-          transfileRef.value.onReceiveChannelMessageCallback;
         receiveChannel.value.onmessage = (event) => {
           resetActivityTimer();
-          if (originalOnReceiveMessage)
-            originalOnReceiveMessage.call(transfileRef.value, event);
+          if (transfileRef.value) {
+            transfileRef.value.onReceiveChannelMessageCallback(event);
+          }
         };
         receiveChannel.value.onclose =
           transfileRef.value.onReceiveChannelStateChange;
       } else if (tab === 'text' && transtextRef.value) {
         console.log('切换为text');
-        const originalTextReceiveOnOpen =
-          transtextRef.value.onReceiveChannelStateChange; // Placeholder
-        receiveChannel.value.onopen = (event) => {
-          resetActivityTimer();
-          if (originalTextReceiveOnOpen)
-            originalTextReceiveOnOpen.call(transtextRef.value, event);
-          else if (transtextRef.value) transtextRef.value.isConnected = true;
-        };
-        const originalOnTextMsgReceived =
-          transtextRef.value.onTextMessageReceived;
         receiveChannel.value.onmessage = (event) => {
           resetActivityTimer();
           try {
             const message = JSON.parse(event.data);
-            if (originalOnTextMsgReceived)
-              originalOnTextMsgReceived.call(transtextRef.value, message);
+            if (transtextRef.value) {
+              transtextRef.value.onTextMessageReceived(message);
+            }
           } catch (error) {
             console.error('解析消息失败:', error);
           }
-        };
-        const originalTextReceiveOnClose =
-          transtextRef.value.onReceiveChannelStateChange; // Placeholder
-        receiveChannel.value.onclose = (event) => {
-          if (originalTextReceiveOnClose)
-            originalTextReceiveOnClose.call(transtextRef.value, event);
-          else if (transtextRef.value) transtextRef.value.isConnected = false;
         };
       }
     }
@@ -342,33 +330,16 @@ const switchFunction = (tab) => {
         sendChannel.value.onclose = transfileRef.value.onSendChannelStateChange;
       } else if (tab === 'text' && transtextRef.value) {
         console.log('切换为text');
-        const originalTextSendOnOpen =
-          transtextRef.value.onSendChannelStateChange; // Placeholder
-        sendChannel.value.onopen = (event) => {
-          resetActivityTimer();
-          if (originalTextSendOnOpen)
-            originalTextSendOnOpen.call(transtextRef.value, event);
-          else if (transtextRef.value) transtextRef.value.isConnected = true;
-        };
-        // Assuming text component might also listen to messages on sendChannel (e.g. self-acks)
-        const originalTextSendOnMessage =
-          transtextRef.value.onTextMessageReceived; // Or a specific handler
         sendChannel.value.onmessage = (event) => {
           resetActivityTimer();
           try {
             const message = JSON.parse(event.data);
-            if (originalTextSendOnMessage)
-              originalTextSendOnMessage.call(transtextRef.value, message);
+            if (transtextRef.value) {
+              transtextRef.value.onTextMessageReceived(message);
+            }
           } catch (error) {
             console.error('解析消息失败:', error);
           }
-        };
-        const originalTextSendOnClose =
-          transtextRef.value.onSendChannelStateChange; // Placeholder
-        sendChannel.value.onclose = (event) => {
-          if (originalTextSendOnClose)
-            originalTextSendOnClose.call(transtextRef.value, event);
-          else if (transtextRef.value) transtextRef.value.isConnected = false;
         };
       }
     }
@@ -379,8 +350,11 @@ const closeChannel = (channel) => {
   clearTimeout(activityTimer.value); // Clear timer when a channel is manually closed
   channel.close();
   channel = null;
-  transfileRef.value.con_status = false;
-  transfileRef.value.isSelf = true;
+  if (transfileRef.value) {
+    transfileRef.value.con_status = false;
+    transfileRef.value.isSelf = true;
+  }
+  pc.value = null;
 };
 
 const discInner = (channel, shenfen) => {
@@ -404,22 +378,25 @@ const handleDisconnect = () => {
 const singDiscInner = (channel) => {
   channel.close();
   channel = null;
-  transfileRef.value.con_status = false;
-  // todo 有歧义，可能得换个变量名
-  transfileRef.value.isSelf = true;
-  if (transfileRef.value.isSelf) {
-    ElMessage.error('对方断开连接...请确认～');
+  if (transfileRef.value) {
+    transfileRef.value.con_status = false;
+    // todo 有歧义，可能得换个变量名
+    transfileRef.value.isSelf = true;
+    if (transfileRef.value.isSelf) {
+      ElMessage.error('对方断开连接...请确认～');
+    }
   }
-  return;
 };
 
 const signalingDisconncted = (shenfen) => {
   console.log('signalingDisconncted-----', shenfen);
   if (shenfen === 'sendChannel') {
     singDiscInner(receiveChannel.value);
+    return;
   }
   if (shenfen === 'receiveChannel') {
     singDiscInner(sendChannel.value);
+    return;
   }
 };
 
@@ -428,69 +405,71 @@ async function createPeerConnection() {
   // 创建 peerconnection
   pc.value = new RTCPeerConnection(configuration.value);
 
-  // 创建图
-  const bitrateSeries = new TimelineDataSeries();
-  const bitrateGraph = new TimelineGraphView('bitrateGraph', 'bitrateCanvas');
-  bitrateGraph.updateEndDate();
+  if (activeTab.value === 'file') {
+    // 创建图
+    const bitrateSeries = new TimelineDataSeries();
+    const bitrateGraph = new TimelineGraphView('bitrateGraph', 'bitrateCanvas');
+    bitrateGraph.updateEndDate();
 
-  // 每秒获取一次 WebRTC 统计信息
-  setInterval(() => {
-    // 获取 RTCPeerConnection 的统计信息
-    pc.value.getStats().then((stats) => {
-      // 打印统计信息到控制台
-      console.log('states', stats);
-      let statsOutput = '';
+    // 每秒获取一次 WebRTC 统计信息
+    setInterval(() => {
+      // 获取 RTCPeerConnection 的统计信息
+      pc.value.getStats().then((stats) => {
+        // 打印统计信息到控制台
+        console.log('states', stats);
+        let statsOutput = '';
 
-      // 遍历所有统计报告
-      stats.forEach((report) => {
-        // 查找数据通道或传输相关的报告
-        if (report.type === 'data-channel' || report.type === 'transport') {
-          // 获取当前时间戳和发送的字节数
-          const now = report.timestamp;
-          const bytes = report.bytesSent;
+        // 遍历所有统计报告
+        stats.forEach((report) => {
+          // 查找数据通道或传输相关的报告
+          if (report.type === 'data-channel' || report.type === 'transport') {
+            // 获取当前时间戳和发送的字节数
+            const now = report.timestamp;
+            const bytes = report.bytesSent;
 
-          // 如果存在上一次的结果并且包含当前报告的ID
-          if (lastResult.value && lastResult.value.has(report.id)) {
-            // 计算MB/s ((bytes2 - bytes1) / 1024 / 1024 / (time2 - time1) / 1000)
-            const bitrate =
-              (bytes - lastResult.value.get(report.id).bytesSent) /
-              ((now - lastResult.value.get(report.id).timestamp) / 1000); // 计算时间差（毫秒）
-            // 打印计算出的比特率
-            console.log('bitrate', bitrate);
-            // 更新最大传输速率
-            maxTransferData.value = Math.max(
-              maxTransferData.value,
-              bitrate.toFixed(2)
-            );
-            realTimeRate.value = bitrate.toFixed(2);
-            // 将当前时间戳和比特率添加到时间线数据系列
-            bitrateSeries.addPoint(now, bitrate);
-            // 更新比特率图表的数据系列
-            bitrateGraph.setDataSeries([bitrateSeries]);
-            // 更新比特率图表的结束时间
-            bitrateGraph.updateEndDate();
+            // 如果存在上一次的结果并且包含当前报告的ID
+            if (lastResult.value && lastResult.value.has(report.id)) {
+              // 计算MB/s ((bytes2 - bytes1) / 1024 / 1024 / (time2 - time1) / 1000)
+              const bitrate =
+                (bytes - lastResult.value.get(report.id).bytesSent) /
+                ((now - lastResult.value.get(report.id).timestamp) / 1000); // 计算时间差（毫秒）
+              // 打印计算出的比特率
+              console.log('bitrate', bitrate);
+              // 更新最大传输速率
+              maxTransferData.value = Math.max(
+                maxTransferData.value,
+                bitrate.toFixed(2)
+              );
+              realTimeRate.value = bitrate.toFixed(2);
+              // 将当前时间戳和比特率添加到时间线数据系列
+              bitrateSeries.addPoint(now, bitrate);
+              // 更新比特率图表的数据系列
+              bitrateGraph.setDataSeries([bitrateSeries]);
+              // 更新比特率图表的结束时间
+              bitrateGraph.updateEndDate();
+            }
+            // statsOutput +=
+            //   `<h2>Report: ${report.type}</h2>\n<strong>ID:</strong> ${report.id}<br>\n` +
+            //   `<strong>Timestamp:</strong> ${report.timestamp}<br>\n`;
+            // Object.keys(report).forEach((statName) => {
+            //   if (
+            //     statName !== 'id' &&
+            //     statName !== 'timestamp' &&
+            //     statName !== 'type'
+            //   ) {
+            //     statsOutput += `<strong>${statName}:</strong> ${report[statName]}<br>\n`;
+            //   }
+            // });
           }
-          // statsOutput +=
-          //   `<h2>Report: ${report.type}</h2>\n<strong>ID:</strong> ${report.id}<br>\n` +
-          //   `<strong>Timestamp:</strong> ${report.timestamp}<br>\n`;
-          // Object.keys(report).forEach((statName) => {
-          //   if (
-          //     statName !== 'id' &&
-          //     statName !== 'timestamp' &&
-          //     statName !== 'type'
-          //   ) {
-          //     statsOutput += `<strong>${statName}:</strong> ${report[statName]}<br>\n`;
-          //   }
-          // });
-        }
-      });
+        });
 
-      // 保存当前统计结果供下次计算使用
-      lastResult.value = stats;
-      // 将统计输出显示在页面上 (如果 statsbox 存在)
-      // transfileRef.value?.statsbox.innerHTML = statsOutput;
-    });
-  }, 1000); // 每1000毫秒（1秒）执行一次
+        // 保存当前统计结果供下次计算使用
+        lastResult.value = stats;
+        // 将统计输出显示在页面上 (如果 statsbox 存在)
+        // transfileRef.value?.statsbox.innerHTML = statsOutput;
+      });
+    }, 1000); // 每1000毫秒（1秒）执行一次
+  }
 
   // 监听 ice 事件
   pc.value.onicecandidate = (e) => {
@@ -559,7 +538,9 @@ async function handleAnswer(answer) {
   await pc.value.setRemoteDescription(answer);
 
   // 成功设置对方的连接信息改变连接状态
-  transfileRef.value.con_status = true;
+  if (transfileRef.value) {
+    transfileRef.value.con_status = true;
+  }
   // 同时发送信号给对方改变状态
   signaling.value.postMessage({ type: 'connction', status: 'connected' });
 }
@@ -758,7 +739,9 @@ onMounted(() => {
         handleCandidate(e.data);
         break;
       case 'connction':
-        transfileRef.value.con_status = e.data.status === 'connected';
+        if (transfileRef.value) {
+          transfileRef.value.con_status = e.data.status === 'connected';
+        }
         break;
       case 'disconncted':
         signalingDisconncted(e.data.shenfen);
@@ -775,6 +758,10 @@ onMounted(() => {
         }
         sureConnect(e.data);
         break;
+      case 'endCall':
+        if (transvideoRef.value) {
+          transvideoRef.value.endVideoCall();
+        }
       default:
         console.log('unhandled', e);
         break;

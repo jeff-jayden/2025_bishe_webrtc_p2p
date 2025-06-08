@@ -164,7 +164,7 @@
 
 <script setup lang="ts">
 import { CloseOne, Dot, Download } from '@icon-park/vue-next';
-import { ref, onMounted, type Ref } from 'vue';
+import { ref, onMounted, type Ref, onUnmounted } from 'vue';
 
 // Define interfaces for props and refs
 interface FileTransferStatus {
@@ -221,19 +221,7 @@ const props = defineProps<{
   realTimeRate: number;
 }>();
 
-// Original props definition commented out for reference
-/*
-const props = defineProps({
-  receivedFileList: Array,
-  sendChannel: Object,
-  receiveChannel: Object,
-  currentTransfers: Object,
-  receivedFileChunks: Object,
-  receivedFileSizes: Object,
-  maxTransferData: Number,
-  realTimeRate: Number,
-});
-*/
+const emit = defineEmits(['closeChannel']);
 
 const getFileList = (): void => {
   var myHeaders = new Headers();
@@ -938,7 +926,7 @@ const selectFile = (): void => {
         webkitGetAsEntry: () => ({
           isFile: true,
           name: file.name,
-          file: (callback) => callback(file),
+          file: (callback: any) => callback(file),
         }),
       }))
     );
@@ -983,6 +971,11 @@ defineExpose({
 // 监听通道状态变化
 onMounted(() => {
   connectAlist();
+});
+
+onUnmounted(() => {
+  // 关闭通道
+  emit('closeChannel');
 });
 </script>
 
